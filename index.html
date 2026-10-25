@@ -747,7 +747,7 @@ function adminPage() {
   const s = settings;
   const num = (id, label, val, min, max, hint) => `<label class="field" for="${id}"><span>${label}</span><input type="number" id="${id}" value="${val}" min="${min}" max="${max}" inputmode="numeric"><small>${hint}</small></label>`;
   app.innerHTML = `
-    <header class="top"><div><h1><span>Réglages</span></h1><p class="lead">Choisis les nombres utilisés dans chaque jeu. Les réglages sont enregistrés sur cet appareil.</p></div><button class="big-btn alt" id="back">Menu</button></header>
+    <header class="top"><div><h1><span>Réglages</span></h1><p class="lead">Choisis les nombres utilisés dans chaque jeu. Les réglages sont enregistrés sur cet appareil et, si tu es connecté, sur ton compte.</p></div><button class="big-btn alt" id="back">Menu</button></header>
     <form id="admin" class="admin">
       <section class="review"><h3>Calcul mental <small>(aussi utilisé par Calcul mental +)</small></h3><div class="fields">
         ${num("a-cible", "Compléments à", s.calc.cible, 3, 100, "10 donne 8 + 2, 10 − 7…")}
@@ -769,7 +769,11 @@ function adminPage() {
       <p class="err" id="a-err" hidden></p>
       <p class="saved" id="a-ok" hidden>Réglages enregistrés.</p>
       <div class="actions"><button class="big-btn" type="submit">Enregistrer</button><button class="big-btn alt" type="button" id="a-reset">Remettre les valeurs de départ</button></div>
-    </form>`;
+    </form>
+    <section class="review"><h3>Synchronisation <small>${account ? esc(account.email) : "aucun compte connecté"}</small></h3>
+      <p id="sync-status">${account ? esc(syncMsg || "Envoie et récupère les joueurs, scores, collections et réglages de ton compte.") : "Connecte-toi pour retrouver tes joueurs, scores et collections sur tous tes appareils."}</p>
+      <div class="actions"><button class="big-btn" type="button" id="sync-now">${account ? "Synchroniser maintenant" : "Se connecter"}</button></div>
+    </section>`;
   const v = id => Number(document.getElementById(id).value);
   const err = msg => { const e = document.getElementById("a-err"); e.textContent = msg; e.hidden = false; document.getElementById("a-ok").hidden = true; };
   const inRange = (x, a, b) => Number.isInteger(x) && x >= a && x <= b;
@@ -798,6 +802,19 @@ function adminPage() {
     document.getElementById("a-ok").textContent = "Valeurs de départ remises."; document.getElementById("a-ok").hidden = false;
   };
   document.getElementById("back").onclick = menu;
+  document.getElementById("sync-now").onclick = async () => {
+    if (!account) return accountPage();
+    const b = document.getElementById("sync-now"), st = document.getElementById("sync-status");
+    b.disabled = true; st.textContent = "Synchronisation en cours…";
+    const before = JSON.stringify(settings);
+    await syncNow();
+    if (JSON.stringify(settings) !== before) {   // des réglages plus récents sont arrivés : on les affiche
+      adminPage();
+      document.getElementById("sync-status").textContent = syncMsg + " Réglages mis à jour depuis ton compte.";
+      return;
+    }
+    st.textContent = syncMsg; b.disabled = false;
+  };
 }
 
 /* ---------- Choix du joueur ---------- */
@@ -1093,8 +1110,8 @@ if (!(player && loadPlayers().list.includes(player))) player = null;
 /* ---------- Compte en ligne (Supabase) : sauvegarde des joueurs, scores et collections ---------- */
 const SB_URL = "https://aeulgsucvabyuneuaxzh.supabase.co";
 const SB_KEY = "sb_publishable_IPo-HOkmb3tj7fwTg3zqvw_0HTVJN7k";   // clé publique : protégée par les règles de sécurité (RLS)
-const ACC_KEY = "defi2min-compte";
-const _setItem = Storage.prototype.setItem;
+const ACC_KEY = "defi2min-compte", MAJ_KEY = "defi2min-reglages-maj";
+const _setItem = Storage.prototype.setItem, _removeItem = Storage.prototype.removeItem;
 const rawSet = (k, v) => { try { _setItem.call(localStorage, k, v); } catch (e) {} };
 const rawJSON = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
 let account = rawJSON(ACC_KEY);   // { access, refresh, expires, email, uid }
@@ -1147,7 +1164,7 @@ function frErr(e) {
 function snapshot() {
   const p = loadPlayers(), coll = {};
   p.list.forEach(n => { coll[n] = dexOf(n); });
-  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), reglages: rawJSON(SETTINGS_KEY) };
+  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), reglages: rawJSON(SETTINGS_KEY), reglagesMaj: Number(localStorage.getItem(MAJ_KEY)) || 0 };
 }
 const getCI = (obj, name) => { const k = Object.keys(obj || {}).find(x => x.toLowerCase() === name.toLowerCase()); return k ? obj[k] : {}; };
 function mergeSnap(a, b) {
@@ -1169,14 +1186,19 @@ function mergeSnap(a, b) {
     });
     scores[mode] = all.sort((x, y) => y.score - x.score || x.date - y.date).slice(0, 10);
   });
-  return { v: 1, joueurs: list, collections, scores, reglages: a.reglages || b.reglages || null };
+  // Réglages : la version la plus récente gagne (sans date connue, on garde ceux qui existent)
+  const am = a.reglagesMaj || 0, bm = b.reglagesMaj || 0;
+  const reglages = am === bm ? (a.reglages || b.reglages || null) : (bm > am ? (b.reglages || null) : (a.reglages || null));
+  return { v: 1, joueurs: list, collections, scores, reglages, reglagesMaj: Math.max(am, bm) };
 }
 function applySnap(s) {
   const p = loadPlayers();
   rawSet(PLAYERS_KEY, JSON.stringify({ list: s.joueurs, current: p.current }));
   s.joueurs.forEach(n => rawSet(dexKey(n), JSON.stringify(s.collections[n] || {})));
   rawSet(KEY, JSON.stringify(s.scores));
-  if (s.reglages && !localStorage.getItem(SETTINGS_KEY)) { rawSet(SETTINGS_KEY, JSON.stringify(s.reglages)); settings = loadSettings(); }
+  if (s.reglagesMaj) rawSet(MAJ_KEY, String(s.reglagesMaj));
+  if (s.reglages) rawSet(SETTINGS_KEY, JSON.stringify(s.reglages)); else { try { _removeItem.call(localStorage, SETTINGS_KEY); } catch (e) {} }
+  settings = loadSettings();
 }
 
 async function syncNow() {
@@ -1202,7 +1224,12 @@ function scheduleSync() { if (!account) return; clearTimeout(syncTimer); syncTim
 // Chaque enregistrement du jeu (scores, créatures, joueurs, réglages) déclenche une sauvegarde en ligne
 Storage.prototype.setItem = function (k, v) {
   _setItem.call(this, k, v);
+  if (this === localStorage && k === SETTINGS_KEY) rawSet(MAJ_KEY, String(Date.now()));
   if (this === localStorage && typeof k === "string" && k.startsWith("defi2min-") && k !== ACC_KEY && k !== "defi2min-musique") scheduleSync();
+};
+Storage.prototype.removeItem = function (k) {
+  _removeItem.call(this, k);
+  if (this === localStorage && k === SETTINGS_KEY) { rawSet(MAJ_KEY, String(Date.now())); scheduleSync(); }
 };
 window.addEventListener("online", scheduleSync);
 
