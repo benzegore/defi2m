@@ -681,7 +681,7 @@ function menu() {
   clearInterval(timer); document.onkeydown = null;
   const sc = loadScores(), best = { calc: sc.calc[0]?.score, num: sc.num[0]?.score, sous: sc.sous[0]?.score, mult: sc.mult[0]?.score, plus: sc.plus[0]?.score };
   app.innerHTML = `
-    <div class="title-row"><h1>Défi <span>2 minutes</span></h1><div class="mini-row"><button class="ghost mini" id="go-admin">Réglages</button><button class="ghost mini" id="go-players">Changer de joueur</button></div></div>
+    <div class="title-row"><h1>Défi <span>2 minutes</span></h1><div class="mini-row"><button class="ghost mini" id="go-admin">Réglages</button><button class="ghost mini" id="go-players">Changer de joueur</button><button class="ghost mini" id="go-account">Compte</button></div></div>
     <header class="top"><p class="lead">Chaque bonne réponse attrape une créature sauvage. Combien vas-tu en attraper en 2 minutes ?</p><div class="parade">${creatureSVG(0, 58)}${creatureSVG(1, 68)}${creatureSVG(2, 80)}</div></header>
     <div class="who"><span>Joueur : <strong>${esc(player)}</strong></span><button class="big-btn alt" id="go-scores">Meilleurs scores</button><button class="big-btn alt" id="go-dex">Collection</button></div>
     <div class="modes">
@@ -736,6 +736,7 @@ function menu() {
   document.getElementById("go-scores").onclick = scoresPage;
   document.getElementById("go-dex").onclick = collectionPage;
   document.getElementById("go-players").onclick = playersPage;
+  document.getElementById("go-account").onclick = accountPage;
   document.getElementById("go-admin").onclick = adminPage;
 }
 
@@ -815,6 +816,7 @@ function playersPage() {
       <div class="row"><input id="pseudo" maxlength="16" placeholder="Écris ton pseudo" autocomplete="off"><button class="big-btn" type="submit">C'est moi !</button></div>
       <p class="err" id="err" hidden>Écris un pseudo d'au moins 2 lettres.</p>
     </form>
+    <p style="margin:0"><button class="ghost mini" id="go-account">${account ? "Compte : " + esc(account.email) : "Se connecter / créer un compte"}</button></p>
     ${p.list.length ? `<section class="review"><h3>Joueurs déjà inscrits <small>touche ton pseudo pour jouer</small></h3><div class="players">${p.list.map(card).join("")}</div></section>` : ""}`;
   document.getElementById("pf").onsubmit = e => {
     e.preventDefault();
@@ -824,6 +826,7 @@ function playersPage() {
   };
   document.querySelectorAll(".player").forEach(b => b.onclick = () => { choosePlayer(p.list[b.dataset.i]); menu(); });
   const back = document.getElementById("back"); if (back) back.onclick = menu;
+  document.getElementById("go-account").onclick = accountPage;
 }
 
 /* ---------- Meilleurs scores ---------- */
@@ -1087,7 +1090,242 @@ function endNum(hist) {
 
 // Au lancement, on arrive toujours sur le choix du joueur.
 if (!(player && loadPlayers().list.includes(player))) player = null;
-playersPage();
+/* ---------- Compte en ligne (Supabase) : sauvegarde des joueurs, scores et collections ---------- */
+const SB_URL = "https://aeulgsucvabyuneuaxzh.supabase.co";
+const SB_KEY = "sb_publishable_IPo-HOkmb3tj7fwTg3zqvw_0HTVJN7k";   // clé publique : protégée par les règles de sécurité (RLS)
+const ACC_KEY = "defi2min-compte";
+const _setItem = Storage.prototype.setItem;
+const rawSet = (k, v) => { try { _setItem.call(localStorage, k, v); } catch (e) {} };
+const rawJSON = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
+let account = rawJSON(ACC_KEY);   // { access, refresh, expires, email, uid }
+let syncTimer = null, syncing = false, syncMsg = "";
+
+async function sb(path, { method = "GET", body, token, headers = {} } = {}) {
+  const res = await fetch(SB_URL + path, {
+    method,
+    headers: { apikey: SB_KEY, "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}), ...headers },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let data = null; try { data = text ? JSON.parse(text) : null; } catch (e) {}
+  if (!res.ok) {
+    const err = new Error((data && (data.msg || data.error_description || data.message)) || ("Erreur " + res.status));
+    err.status = res.status; throw err;
+  }
+  return data;
+}
+function setAccount(a) {
+  account = a;
+  if (a) rawSet(ACC_KEY, JSON.stringify(a)); else { try { localStorage.removeItem(ACC_KEY); } catch (e) {} }
+}
+const sessionFrom = d => ({ access: d.access_token, refresh: d.refresh_token, expires: Date.now() + (d.expires_in - 60) * 1000, email: d.user.email, uid: d.user.id });
+async function freshToken() {
+  if (Date.now() < account.expires) return account.access;
+  try {
+    const d = await sb("/auth/v1/token?grant_type=refresh_token", { method: "POST", body: { refresh_token: account.refresh } });
+    setAccount(sessionFrom(d));
+  } catch (e) {
+    if (e.status === 400 || e.status === 401) setAccount(null);   // session expirée : il faudra se reconnecter
+    throw e;
+  }
+  return account.access;
+}
+function frErr(e) {
+  const m = String(e && e.message || "");
+  if (e instanceof TypeError) return "Pas de connexion internet.";
+  if (/invalid login/i.test(m)) return "E-mail ou mot de passe incorrect.";
+  if (/already registered|already been registered/i.test(m)) return "Cet e-mail a déjà un compte : appuie sur « Se connecter ».";
+  if (/at least 6|weak/i.test(m)) return "Le mot de passe doit avoir au moins 6 caractères.";
+  if (/different from the old/i.test(m)) return "Choisis un mot de passe différent de l'ancien.";
+  if (/not confirmed/i.test(m)) return "Confirme d'abord ton e-mail (regarde ta boîte de réception).";
+  if (e.status === 429) return "Trop d'essais : réessaie dans quelques minutes.";
+  if (e.status === 404) return "La base en ligne n'est pas encore prête (script SQL à lancer dans Supabase).";
+  return m || "Une erreur est survenue.";
+}
+
+/* Instantané des données du jeu, et fusion local + en ligne (on ne perd jamais rien) */
+function snapshot() {
+  const p = loadPlayers(), coll = {};
+  p.list.forEach(n => { coll[n] = dexOf(n); });
+  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), reglages: rawJSON(SETTINGS_KEY) };
+}
+const getCI = (obj, name) => { const k = Object.keys(obj || {}).find(x => x.toLowerCase() === name.toLowerCase()); return k ? obj[k] : {}; };
+function mergeSnap(a, b) {
+  b = b || {};
+  const list = [...(a.joueurs || [])];
+  (b.joueurs || []).forEach(n => { if (!list.some(x => x.toLowerCase() === n.toLowerCase())) list.push(n); });
+  const collections = {};
+  list.forEach(n => {
+    const x = getCI(a.collections, n), y = getCI(b.collections, n), m = { ...x };
+    Object.keys(y).forEach(id => { m[id] = Math.max(m[id] || 0, y[id] || 0); });
+    collections[n] = m;
+  });
+  const scores = {};
+  ["calc", "num", "sous", "mult", "plus"].forEach(mode => {
+    const seen = new Set(), all = [];
+    [...((a.scores || {})[mode] || []), ...((b.scores || {})[mode] || [])].forEach(e => {
+      const k = e.who + "|" + e.date + "|" + e.score;
+      if (!seen.has(k)) { seen.add(k); all.push(e); }
+    });
+    scores[mode] = all.sort((x, y) => y.score - x.score || x.date - y.date).slice(0, 10);
+  });
+  return { v: 1, joueurs: list, collections, scores, reglages: a.reglages || b.reglages || null };
+}
+function applySnap(s) {
+  const p = loadPlayers();
+  rawSet(PLAYERS_KEY, JSON.stringify({ list: s.joueurs, current: p.current }));
+  s.joueurs.forEach(n => rawSet(dexKey(n), JSON.stringify(s.collections[n] || {})));
+  rawSet(KEY, JSON.stringify(s.scores));
+  if (s.reglages && !localStorage.getItem(SETTINGS_KEY)) { rawSet(SETTINGS_KEY, JSON.stringify(s.reglages)); settings = loadSettings(); }
+}
+
+async function syncNow() {
+  if (!account || syncing) return false;
+  syncing = true;
+  try {
+    const token = await freshToken();
+    const rows = await sb("/rest/v1/sauvegardes?select=data&user_id=eq." + account.uid, { token });
+    const merged = mergeSnap(snapshot(), rows && rows[0] && rows[0].data);
+    applySnap(merged);
+    await sb("/rest/v1/sauvegardes?on_conflict=user_id", {
+      method: "POST", token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: { user_id: account.uid, data: merged, updated_at: new Date().toISOString() },
+    });
+    syncMsg = "Dernière sauvegarde : " + new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    return true;
+  } catch (e) {
+    syncMsg = "Sauvegarde en attente : " + frErr(e);
+    return false;
+  } finally { syncing = false; }
+}
+function scheduleSync() { if (!account) return; clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 2500); }
+// Chaque enregistrement du jeu (scores, créatures, joueurs, réglages) déclenche une sauvegarde en ligne
+Storage.prototype.setItem = function (k, v) {
+  _setItem.call(this, k, v);
+  if (this === localStorage && typeof k === "string" && k.startsWith("defi2min-") && k !== ACC_KEY && k !== "defi2min-musique") scheduleSync();
+};
+window.addEventListener("online", scheduleSync);
+
+/* ---------- Écran « Mon compte » ---------- */
+function accountPage() {
+  clearInterval(timer); document.onkeydown = null;
+  const goBack = () => (player ? menu() : playersPage());
+  const out = !account;
+  app.innerHTML = `
+    <header class="top"><div><h1>Mon <span>compte</span></h1><p class="lead">${out
+      ? "Crée un compte (avec l'e-mail d'un parent) pour garder les joueurs, les scores et les collections, même sur un autre téléphone."
+      : "Connecté avec <strong>" + esc(account.email) + "</strong>. Les joueurs, scores et collections sont sauvegardés automatiquement."}</p></div><button class="big-btn alt" id="back">${player ? "Menu" : "Joueurs"}</button></header>
+    ${out ? `
+    <form class="pseudo" id="af" novalidate>
+      <label for="em">E-mail</label>
+      <input id="em" type="email" autocomplete="email" inputmode="email" placeholder="parent@exemple.fr">
+      <label for="pw">Mot de passe</label>
+      <input id="pw" type="password" autocomplete="current-password" placeholder="6 caractères minimum">
+      <div class="row"><button class="big-btn" type="submit" id="login">Se connecter</button><button class="big-btn alt" type="button" id="signup">Créer un compte</button></div>
+      <p class="err" id="amsg" hidden></p>
+      <p class="lead" id="ainfo" hidden></p>
+      <p style="margin:0"><button class="ghost mini" type="button" id="forgot">Mot de passe oublié ?</button></p>
+    </form>` : `
+    <section class="review">
+      <p id="smsg">${esc(syncMsg || "Prêt.")}</p>
+      <div class="actions"><button class="big-btn" id="syncbtn">Sauvegarder maintenant</button><button class="big-btn alt" id="logout">Se déconnecter</button></div>
+      <p class="lead">Se déconnecter garde les données sur ce téléphone, mais elles ne seront plus envoyées en ligne.</p>
+    </section>`}`;
+  document.getElementById("back").onclick = goBack;
+  if (out) {
+    const msg = document.getElementById("amsg"), btns = [...document.querySelectorAll("#af button")];
+    const show = t => { msg.textContent = t; msg.hidden = false; };
+    const auth = async mode => {
+      const email = document.getElementById("em").value.trim(), pw = document.getElementById("pw").value;
+      if (!/^\S+@\S+\.\S+$/.test(email)) return show("Écris une adresse e-mail valide.");
+      if (pw.length < 6) return show("Le mot de passe doit avoir au moins 6 caractères.");
+      msg.hidden = true; btns.forEach(b => { b.disabled = true; });
+      try {
+        const d = mode === "signup"
+          ? await sb("/auth/v1/signup", { method: "POST", body: { email, password: pw } })
+          : await sb("/auth/v1/token?grant_type=password", { method: "POST", body: { email, password: pw } });
+        if (!d || !d.access_token) { show("Compte créé. Ouvre le mail de confirmation, puis reviens te connecter."); btns.forEach(b => { b.disabled = false; }); return; }
+        setAccount(sessionFrom(d));
+        await syncNow();
+        accountPage();
+      } catch (e) { show(frErr(e)); btns.forEach(b => { b.disabled = false; }); }
+    };
+    document.getElementById("af").onsubmit = e => { e.preventDefault(); auth("login"); };
+    document.getElementById("signup").onclick = () => auth("signup");
+    document.getElementById("forgot").onclick = async () => {
+      const email = document.getElementById("em").value.trim(), info = document.getElementById("ainfo");
+      if (!/^\S+@\S+\.\S+$/.test(email)) return show("Écris ton adresse e-mail ci-dessus, puis appuie sur « Mot de passe oublié ? ».");
+      msg.hidden = true; info.hidden = true; btns.forEach(b => { b.disabled = true; }); document.getElementById("forgot").disabled = true;
+      try {
+        const back = location.origin + location.pathname.replace(/index\.html$/, "");
+        await sb("/auth/v1/recover?redirect_to=" + encodeURIComponent(back), { method: "POST", body: { email } });
+        info.textContent = "Si un compte existe avec cet e-mail, un message vient d'être envoyé. Ouvre le lien qu'il contient (pense à regarder les courriers indésirables).";
+        info.hidden = false;
+      } catch (e) { show(frErr(e)); }
+      btns.forEach(b => { b.disabled = false; }); document.getElementById("forgot").disabled = false;
+    };
+  } else {
+    document.getElementById("syncbtn").onclick = async () => {
+      const b = document.getElementById("syncbtn"); b.disabled = true;
+      await syncNow(); accountPage();
+    };
+    document.getElementById("logout").onclick = () => { setAccount(null); syncMsg = ""; accountPage(); };
+  }
+}
+/* ---------- Réinitialisation du mot de passe (lien reçu par e-mail) ---------- */
+let recovering = false;
+function recoveryPage(sess) {
+  recovering = true; clearInterval(timer); document.onkeydown = null;
+  app.innerHTML = `
+    <header class="top"><div><h1>Nouveau <span>mot de passe</span></h1><p class="lead">Choisis un nouveau mot de passe pour ton compte.</p></div></header>
+    <form class="pseudo" id="rf" novalidate>
+      <label for="np">Nouveau mot de passe</label>
+      <input id="np" type="password" autocomplete="new-password" placeholder="6 caractères minimum">
+      <label for="np2">Encore une fois</label>
+      <input id="np2" type="password" autocomplete="new-password">
+      <div class="row"><button class="big-btn" type="submit" id="rsave">Enregistrer</button></div>
+      <p class="err" id="rmsg" hidden></p>
+    </form>`;
+  const msg = document.getElementById("rmsg"), btn = document.getElementById("rsave");
+  const show = t => { msg.textContent = t; msg.hidden = false; };
+  document.getElementById("rf").onsubmit = async e => {
+    e.preventDefault();
+    const a = document.getElementById("np").value, b = document.getElementById("np2").value;
+    if (a.length < 6) return show("Le mot de passe doit avoir au moins 6 caractères.");
+    if (a !== b) return show("Les deux mots de passe ne sont pas identiques.");
+    msg.hidden = true; btn.disabled = true;
+    try {
+      const u = await sb("/auth/v1/user", { method: "PUT", token: sess.access, body: { password: a } });
+      setAccount({ access: sess.access, refresh: sess.refresh, expires: Date.now() + ((sess.expires_in || 3600) - 60) * 1000, email: u.email, uid: u.id });
+      recovering = false;
+      await syncNow();
+      accountPage();
+    } catch (err) {
+      show(err.status === 401 ? "Le lien a expiré : refais « Mot de passe oublié ? »." : frErr(err));
+      btn.disabled = false;
+    }
+  };
+}
+{
+  const hp = new URLSearchParams(location.hash.replace(/^#/, ""));
+  if (hp.get("type") === "recovery" && hp.get("access_token")) {
+    const sess = { access: hp.get("access_token"), refresh: hp.get("refresh_token"), expires_in: Number(hp.get("expires_in")) || 3600 };
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    recoveryPage(sess);
+  } else if (hp.get("error")) {
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    recovering = true; accountPage();
+    const m = document.getElementById("amsg");
+    if (m) { m.textContent = "Le lien a expiré ou a déjà été utilisé. Appuie sur « Mot de passe oublié ? » pour en recevoir un nouveau."; m.hidden = false; }
+  }
+}
+// Au démarrage : récupère les données en ligne, puis rafraîchit l'écran des joueurs s'il est affiché
+if (account) syncNow().then(ok => {
+  const pseudo = document.getElementById("pseudo");
+  if (ok && document.getElementById("pf") && pseudo && !pseudo.value) playersPage();
+});
+
+if (!recovering) playersPage();
 </script>
 
 <script>
