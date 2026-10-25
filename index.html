@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Défi 2 minutes</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2456c9">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
 <title>Défi 2 minutes</title>
@@ -1084,5 +1090,10 @@ if (!(player && loadPlayers().list.includes(player))) player = null;
 playersPage();
 </script>
 
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+</script>
 </body>
 </html>
