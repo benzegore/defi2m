@@ -424,10 +424,32 @@ function legacyDex() {
     return m;
   } catch (e) { return {}; }
 }
+const ETAT_KEY = "defi2min-joueurs-etat";   // { "pseudo en minuscules": { at: date, del: true/false } }
+function loadEtat() { try { return JSON.parse(localStorage.getItem(ETAT_KEY)) || {}; } catch (e) { return {}; } }
+function markPlayer(name, del) {
+  const e = loadEtat(); e[name.toLowerCase()] = { at: Date.now(), del };
+  try { localStorage.setItem(ETAT_KEY, JSON.stringify(e)); } catch (x) {}
+}
+function deletePlayer(name) {
+  const p = loadPlayers(), low = name.toLowerCase();
+  p.list = p.list.filter(n => n !== name);
+  if (p.current === name) p.current = null;
+  if (player === name) player = null;
+  savePlayers(p);
+  try {
+    localStorage.removeItem(dexKey(name));
+    localStorage.removeItem("defi2min-collection"); localStorage.removeItem("defi2min-dex");   // anciennes collections déjà reprises par le premier joueur
+    const all = loadScores();
+    Object.keys(all).forEach(m => { all[m] = all[m].filter(sc => String(sc.who || "").toLowerCase() !== low); });
+    localStorage.setItem(KEY, JSON.stringify(all));
+  } catch (e) {}
+  markPlayer(name, true);
+}
 function choosePlayer(name) {
   const p = loadPlayers(), same = p.list.find(n => n.toLowerCase() === name.toLowerCase());
   if (same) name = same;
   else {
+    if (loadEtat()[name.toLowerCase()]) markPlayer(name, false);   // joueur recréé après suppression
     if (!p.list.length) { try { localStorage.setItem(dexKey(name), JSON.stringify(legacyDex())); } catch (e) {} }
     p.list.push(name);
   }
@@ -744,7 +766,7 @@ function menu() {
 const tablesText = t => t.length === 1 ? `La table de ${t[0]}` : `Les tables de ${t.slice(0, -1).join(", ")} et de ${t[t.length - 1]}`;
 function adminPage() {
   clearInterval(timer); document.onkeydown = null;
-  const s = settings;
+  const s = settings, pl = loadPlayers().list;
   const num = (id, label, val, min, max, hint) => `<label class="field" for="${id}"><span>${label}</span><input type="number" id="${id}" value="${val}" min="${min}" max="${max}" inputmode="numeric"><small>${hint}</small></label>`;
   app.innerHTML = `
     <header class="top"><div><h1><span>Réglages</span></h1><p class="lead">Choisis les nombres utilisés dans chaque jeu. Les réglages sont enregistrés sur cet appareil et, si tu es connecté, sur ton compte.</p></div><button class="big-btn alt" id="back">Menu</button></header>
@@ -770,6 +792,10 @@ function adminPage() {
       <p class="saved" id="a-ok" hidden>Réglages enregistrés.</p>
       <div class="actions"><button class="big-btn" type="submit">Enregistrer</button><button class="big-btn alt" type="button" id="a-reset">Remettre les valeurs de départ</button></div>
     </form>
+    <section class="review"><h3>Joueurs <small>${pl.length ? "supprime un joueur et tous ses résultats" : ""}</small></h3>
+      ${pl.length ? pl.map((n, i) => { const d = dexOf(n), c = Object.keys(d).filter(k => d[k] > 0).length; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #d6e4fb"><span><strong>${esc(n)}</strong> <small>${c} / ${NB_ESPECES * 3} créatures</small></span><button type="button" class="ghost mini" data-del="${i}">Supprimer</button></div>`; }).join("") : "<p>Aucun joueur pour l'instant.</p>"}
+      <p class="saved" id="p-ok" hidden></p>
+    </section>
     <section class="review"><h3>Synchronisation <small>${account ? esc(account.email) : "aucun compte connecté"}</small></h3>
       <p id="sync-status">${account ? esc(syncMsg || "Envoie et récupère les joueurs, scores, collections et réglages de ton compte.") : "Connecte-toi pour retrouver tes joueurs, scores et collections sur tous tes appareils."}</p>
       <div class="actions"><button class="big-btn" type="button" id="sync-now">${account ? "Synchroniser maintenant" : "Se connecter"}</button></div>
@@ -802,6 +828,12 @@ function adminPage() {
     document.getElementById("a-ok").textContent = "Valeurs de départ remises."; document.getElementById("a-ok").hidden = false;
   };
   document.getElementById("back").onclick = menu;
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
+    const name = pl[b.dataset.del];
+    if (!confirm("Supprimer le joueur « " + name + " » ?\n\nSes créatures et ses scores seront effacés" + (account ? " sur tous les appareils connectés au compte." : " de cet appareil.") + "\nCette action est définitive.")) return;
+    deletePlayer(name); adminPage();
+    const ok = document.getElementById("p-ok"); ok.textContent = "Joueur « " + name + " » supprimé."; ok.hidden = false;
+  });
   document.getElementById("sync-now").onclick = async () => {
     if (!account) return accountPage();
     const b = document.getElementById("sync-now"), st = document.getElementById("sync-status");
@@ -1164,13 +1196,18 @@ function frErr(e) {
 function snapshot() {
   const p = loadPlayers(), coll = {};
   p.list.forEach(n => { coll[n] = dexOf(n); });
-  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), reglages: rawJSON(SETTINGS_KEY), reglagesMaj: Number(localStorage.getItem(MAJ_KEY)) || 0 };
+  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), etat: loadEtat(), reglages: rawJSON(SETTINGS_KEY), reglagesMaj: Number(localStorage.getItem(MAJ_KEY)) || 0 };
 }
 const getCI = (obj, name) => { const k = Object.keys(obj || {}).find(x => x.toLowerCase() === name.toLowerCase()); return k ? obj[k] : {}; };
 function mergeSnap(a, b) {
   b = b || {};
+  // Joueurs supprimés : pour chaque pseudo, l'action la plus récente (suppression ou recréation) l'emporte
+  const etat = { ...(a.etat || {}) };
+  Object.keys(b.etat || {}).forEach(k => { const y = b.etat[k], x = etat[k]; if (!x || y.at > x.at || (y.at === x.at && y.del)) etat[k] = y; });
+  const gone = n => { const t = etat[String(n).toLowerCase()]; return !!(t && t.del); };
   const list = [...(a.joueurs || [])];
   (b.joueurs || []).forEach(n => { if (!list.some(x => x.toLowerCase() === n.toLowerCase())) list.push(n); });
+  for (let i = list.length - 1; i >= 0; i--) if (gone(list[i])) list.splice(i, 1);
   const collections = {};
   list.forEach(n => {
     const x = getCI(a.collections, n), y = getCI(b.collections, n), m = { ...x };
@@ -1181,6 +1218,8 @@ function mergeSnap(a, b) {
   ["calc", "num", "sous", "mult", "plus"].forEach(mode => {
     const seen = new Set(), all = [];
     [...((a.scores || {})[mode] || []), ...((b.scores || {})[mode] || [])].forEach(e => {
+      const t = etat[String(e.who || "").toLowerCase()];
+      if (t && (t.del || e.date < t.at)) return;   // score d'un joueur supprimé
       const k = e.who + "|" + e.date + "|" + e.score;
       if (!seen.has(k)) { seen.add(k); all.push(e); }
     });
@@ -1189,11 +1228,14 @@ function mergeSnap(a, b) {
   // Réglages : la version la plus récente gagne (sans date connue, on garde ceux qui existent)
   const am = a.reglagesMaj || 0, bm = b.reglagesMaj || 0;
   const reglages = am === bm ? (a.reglages || b.reglages || null) : (bm > am ? (b.reglages || null) : (a.reglages || null));
-  return { v: 1, joueurs: list, collections, scores, reglages, reglagesMaj: Math.max(am, bm) };
+  return { v: 1, joueurs: list, collections, scores, etat, reglages, reglagesMaj: Math.max(am, bm) };
 }
 function applySnap(s) {
   const p = loadPlayers();
-  rawSet(PLAYERS_KEY, JSON.stringify({ list: s.joueurs, current: p.current }));
+  rawSet(ETAT_KEY, JSON.stringify(s.etat || {}));
+  rawSet(PLAYERS_KEY, JSON.stringify({ list: s.joueurs, current: s.joueurs.includes(p.current) ? p.current : null }));
+  p.list.filter(n => !s.joueurs.includes(n)).forEach(n => { try { _removeItem.call(localStorage, dexKey(n)); } catch (e) {} });
+  if (player && !s.joueurs.includes(player)) player = null;
   s.joueurs.forEach(n => rawSet(dexKey(n), JSON.stringify(s.collections[n] || {})));
   rawSet(KEY, JSON.stringify(s.scores));
   if (s.reglagesMaj) rawSet(MAJ_KEY, String(s.reglagesMaj));
