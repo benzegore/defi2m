@@ -434,10 +434,11 @@ function deletePlayer(name) {
   const p = loadPlayers(), low = name.toLowerCase();
   p.list = p.list.filter(n => n !== name);
   if (p.current === name) p.current = null;
-  if (player === name) player = null;
+  if (player === name) { player = null; settings = loadSettings(); }
   savePlayers(p);
   try {
     localStorage.removeItem(dexKey(name));
+    localStorage.removeItem(settingsKey(name)); localStorage.removeItem("defi2min-reglages-maj:" + name);
     localStorage.removeItem("defi2min-collection"); localStorage.removeItem("defi2min-dex");   // anciennes collections déjà reprises par le premier joueur
     const all = loadScores();
     Object.keys(all).forEach(m => { all[m] = all[m].filter(sc => String(sc.who || "").toLowerCase() !== low); });
@@ -453,7 +454,7 @@ function choosePlayer(name) {
     if (!p.list.length) { try { localStorage.setItem(dexKey(name), JSON.stringify(legacyDex())); } catch (e) {} }
     p.list.push(name);
   }
-  p.current = name; savePlayers(p); player = name;
+  p.current = name; savePlayers(p); player = name; settings = loadSettings();
 }
 function loadDex() { return player ? dexOf(player) : {}; }
 function addCatch(id) {
@@ -765,11 +766,12 @@ function menu() {
 /* ---------- Administration : réglages des jeux ---------- */
 const tablesText = t => t.length === 1 ? `La table de ${t[0]}` : `Les tables de ${t.slice(0, -1).join(", ")} et de ${t[t.length - 1]}`;
 function adminPage() {
+  if (!player) return playersPage();
   clearInterval(timer); document.onkeydown = null;
   const s = settings, pl = loadPlayers().list;
   const num = (id, label, val, min, max, hint) => `<label class="field" for="${id}"><span>${label}</span><input type="number" id="${id}" value="${val}" min="${min}" max="${max}" inputmode="numeric"><small>${hint}</small></label>`;
   app.innerHTML = `
-    <header class="top"><div><h1><span>Réglages</span></h1><p class="lead">Choisis les nombres utilisés dans chaque jeu. Les réglages sont enregistrés sur cet appareil et, si tu es connecté, sur ton compte.</p></div><button class="big-btn alt" id="back">Menu</button></header>
+    <header class="top"><div><h1><span>Réglages</span></h1><p class="lead">Réglages de <strong>${esc(player)}</strong> : ils ne s'appliquent qu'à ce joueur. Choisis les nombres utilisés dans chaque jeu. Ils sont enregistrés sur cet appareil et, si tu es connecté, sur ton compte.</p></div><button class="big-btn alt" id="back">Menu</button></header>
     <form id="admin" class="admin">
       <section class="review"><h3>Calcul mental <small>(aussi utilisé par Calcul mental +)</small></h3><div class="fields">
         ${num("a-cible", "Compléments à", s.calc.cible, 3, 100, "10 donne 8 + 2, 10 − 7…")}
@@ -819,11 +821,11 @@ function adminPage() {
       mult: { tables, multMax: n.multMax },
       num: { min: n.min, max: n.max },
     };
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (x) {}
+    try { localStorage.setItem(settingsKey(player), JSON.stringify(settings)); } catch (x) {}
     document.getElementById("a-err").hidden = true; document.getElementById("a-ok").hidden = false;
   };
   document.getElementById("a-reset").onclick = () => {
-    try { localStorage.removeItem(SETTINGS_KEY); } catch (x) {}
+    try { localStorage.removeItem(settingsKey(player)); } catch (x) {}
     settings = loadSettings(); adminPage();
     document.getElementById("a-ok").textContent = "Valeurs de départ remises."; document.getElementById("a-ok").hidden = false;
   };
@@ -914,6 +916,7 @@ function collectionPage() {
 /* ---------- Calcul mental ---------- */
 /* ---------- Réglages (page Administration) ---------- */
 const SETTINGS_KEY = "defi2min-reglages";
+const settingsKey = n => SETTINGS_KEY + ":" + n;   // réglages propres à chaque joueur
 const DEFAULTS = {
   calc: { cible: 10, addMax: 9 },
   sous: { max: 10, zero: false },
@@ -922,7 +925,7 @@ const DEFAULTS = {
 };
 function loadSettings() {
   let s = {};
-  try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}; } catch (e) {}
+  try { s = (player && JSON.parse(localStorage.getItem(settingsKey(player)))) || {}; } catch (e) {}
   const out = {};
   Object.keys(DEFAULTS).forEach(k => out[k] = { ...DEFAULTS[k], ...(s[k] || {}) });
   return out;
@@ -1139,10 +1142,12 @@ function endNum(hist) {
 
 // Au lancement, on arrive toujours sur le choix du joueur.
 if (!(player && loadPlayers().list.includes(player))) player = null;
+settings = loadSettings();
 /* ---------- Compte en ligne (Supabase) : sauvegarde des joueurs, scores et collections ---------- */
 const SB_URL = "https://aeulgsucvabyuneuaxzh.supabase.co";
 const SB_KEY = "sb_publishable_IPo-HOkmb3tj7fwTg3zqvw_0HTVJN7k";   // clé publique : protégée par les règles de sécurité (RLS)
 const ACC_KEY = "defi2min-compte", MAJ_KEY = "defi2min-reglages-maj";
+const majKey = n => MAJ_KEY + ":" + n;
 const _setItem = Storage.prototype.setItem, _removeItem = Storage.prototype.removeItem;
 const rawSet = (k, v) => { try { _setItem.call(localStorage, k, v); } catch (e) {} };
 const rawJSON = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
@@ -1192,11 +1197,27 @@ function frErr(e) {
   return m || "Une erreur est survenue.";
 }
 
+// Migration : les anciens réglages communs à tous deviennent les réglages de chaque joueur existant
+(function migrateSettings() {
+  try {
+    const old = localStorage.getItem(SETTINGS_KEY);
+    if (old === null) return;
+    const maj = localStorage.getItem(MAJ_KEY) || "0";
+    loadPlayers().list.forEach(n => {
+      if (localStorage.getItem(settingsKey(n)) === null) { rawSet(settingsKey(n), old); rawSet(majKey(n), maj); }
+    });
+    _removeItem.call(localStorage, SETTINGS_KEY); _removeItem.call(localStorage, MAJ_KEY);
+    settings = loadSettings();
+  } catch (e) {}
+})();
+
 /* Instantané des données du jeu, et fusion local + en ligne (on ne perd jamais rien) */
 function snapshot() {
   const p = loadPlayers(), coll = {};
   p.list.forEach(n => { coll[n] = dexOf(n); });
-  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), etat: loadEtat(), reglages: rawJSON(SETTINGS_KEY), reglagesMaj: Number(localStorage.getItem(MAJ_KEY)) || 0 };
+  const rj = {};
+  p.list.forEach(n => { rj[n] = { v: rawJSON(settingsKey(n)), maj: Number(localStorage.getItem(majKey(n))) || 0 }; });
+  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), etat: loadEtat(), reglagesJ: rj };
 }
 const getCI = (obj, name) => { const k = Object.keys(obj || {}).find(x => x.toLowerCase() === name.toLowerCase()); return k ? obj[k] : {}; };
 function mergeSnap(a, b) {
@@ -1225,21 +1246,29 @@ function mergeSnap(a, b) {
     });
     scores[mode] = all.sort((x, y) => y.score - x.score || x.date - y.date).slice(0, 10);
   });
-  // Réglages : la version la plus récente gagne (sans date connue, on garde ceux qui existent)
-  const am = a.reglagesMaj || 0, bm = b.reglagesMaj || 0;
-  const reglages = am === bm ? (a.reglages || b.reglages || null) : (bm > am ? (b.reglages || null) : (a.reglages || null));
-  return { v: 1, joueurs: list, collections, scores, etat, reglages, reglagesMaj: Math.max(am, bm) };
+  // Réglages de chaque joueur : la version la plus récente gagne (sans date connue, on garde ceux qui existent)
+  const reglagesJ = {};
+  list.forEach(n => {
+    const x = getCI(a.reglagesJ, n), y = getCI(b.reglagesJ, n), xm = x.maj || 0, ym = y.maj || 0;
+    reglagesJ[n] = xm === ym ? { v: x.v || y.v || null, maj: xm } : (xm > ym ? { v: x.v || null, maj: xm } : { v: y.v || null, maj: ym });
+    // anciennes sauvegardes en ligne : réglages communs à tous, repris par chaque joueur qui n'a pas les siens
+    if (!b.reglagesJ && b.reglages && !reglagesJ[n].v && !reglagesJ[n].maj) reglagesJ[n] = { v: b.reglages, maj: b.reglagesMaj || 0 };
+  });
+  return { v: 1, joueurs: list, collections, scores, etat, reglagesJ };
 }
 function applySnap(s) {
   const p = loadPlayers();
   rawSet(ETAT_KEY, JSON.stringify(s.etat || {}));
   rawSet(PLAYERS_KEY, JSON.stringify({ list: s.joueurs, current: s.joueurs.includes(p.current) ? p.current : null }));
-  p.list.filter(n => !s.joueurs.includes(n)).forEach(n => { try { _removeItem.call(localStorage, dexKey(n)); } catch (e) {} });
+  p.list.filter(n => !s.joueurs.includes(n)).forEach(n => { try { _removeItem.call(localStorage, dexKey(n)); _removeItem.call(localStorage, settingsKey(n)); _removeItem.call(localStorage, majKey(n)); } catch (e) {} });
   if (player && !s.joueurs.includes(player)) player = null;
   s.joueurs.forEach(n => rawSet(dexKey(n), JSON.stringify(s.collections[n] || {})));
   rawSet(KEY, JSON.stringify(s.scores));
-  if (s.reglagesMaj) rawSet(MAJ_KEY, String(s.reglagesMaj));
-  if (s.reglages) rawSet(SETTINGS_KEY, JSON.stringify(s.reglages)); else { try { _removeItem.call(localStorage, SETTINGS_KEY); } catch (e) {} }
+  s.joueurs.forEach(n => {
+    const r = (s.reglagesJ || {})[n] || {};
+    if (r.maj) rawSet(majKey(n), String(r.maj));
+    if (r.v) rawSet(settingsKey(n), JSON.stringify(r.v)); else { try { _removeItem.call(localStorage, settingsKey(n)); } catch (e) {} }
+  });
   settings = loadSettings();
 }
 
@@ -1266,12 +1295,12 @@ function scheduleSync() { if (!account) return; clearTimeout(syncTimer); syncTim
 // Chaque enregistrement du jeu (scores, créatures, joueurs, réglages) déclenche une sauvegarde en ligne
 Storage.prototype.setItem = function (k, v) {
   _setItem.call(this, k, v);
-  if (this === localStorage && k === SETTINGS_KEY) rawSet(MAJ_KEY, String(Date.now()));
+  if (this === localStorage && typeof k === "string" && k.startsWith(SETTINGS_KEY + ":")) rawSet(majKey(k.slice(SETTINGS_KEY.length + 1)), String(Date.now()));
   if (this === localStorage && typeof k === "string" && k.startsWith("defi2min-") && k !== ACC_KEY && k !== "defi2min-musique") scheduleSync();
 };
 Storage.prototype.removeItem = function (k) {
   _removeItem.call(this, k);
-  if (this === localStorage && k === SETTINGS_KEY) { rawSet(MAJ_KEY, String(Date.now())); scheduleSync(); }
+  if (this === localStorage && typeof k === "string" && k.startsWith(SETTINGS_KEY + ":")) { rawSet(majKey(k.slice(SETTINGS_KEY.length + 1)), String(Date.now())); scheduleSync(); }
 };
 window.addEventListener("online", scheduleSync);
 
