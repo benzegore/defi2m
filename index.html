@@ -15,7 +15,7 @@
 <title>Défi 2 minutes</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Baloo+2:wght@600;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Baloo+2:wght@600;800&family=Playwrite+FR+Trad:wght@400&display=swap">
 <style>
 /* Layout: one centred column on a dotted sky; each screen (menu, jeu, résultat) swaps in place. Blue + electric yellow + capture red, wild creatures appear on grass. */
 :root {
@@ -182,6 +182,27 @@ button:focus-visible { outline: 3px solid var(--pen); outline-offset: 2px; }
 .music-btn[aria-pressed="false"] { color: var(--muted); border-color: var(--line); }
 .title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .title-row .mini { flex: none; font-size: .8rem; padding: 4px 10px; margin-top: 6px; }
+.mega-wrap { position: relative; display: inline-grid; place-items: center; vertical-align: middle; border-radius: 50%; background: radial-gradient(circle, rgba(255, 214, 74, .55) 0%, transparent 68%); }
+.mega-wrap svg { filter: drop-shadow(0 0 6px #f5b301); }
+.mega-tag { position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%); background: #f5b301; color: #3b2c00; font-weight: 800; font-size: .65rem; letter-spacing: .08em; padding: 1px 8px; border-radius: 999px; }
+.mega-won { display: flex; align-items: center; gap: 12px; text-align: left; background: var(--pen-soft); border: 2px solid #f5b301; border-radius: 14px; padding: 10px 14px; }
+.mega-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.mega-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 8px; border-radius: 14px; border: 2px solid #f5b301; background: var(--paper); text-align: center; }
+.mega-card small { color: var(--muted); }
+.mega-card.on { background: var(--pen-soft); box-shadow: 0 4px 0 #f5b301; }
+.mega-card.used { opacity: .5; border-color: var(--line); filter: grayscale(.8); }
+.mega-step { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 14px; background: var(--pen-soft); }
+.mega-step p { margin: 0; }
+.mega-step.attack { border: 2px solid var(--red); }
+.mega-step.done { border: 2px solid var(--green); }
+.tile[disabled] { opacity: .45; }
+.mega-hits p { margin: 4px 0; }
+.age-in { width: 5.5em; flex: none; font: inherit; font-size: 1.2rem; padding: 10px 12px; border-radius: 12px; border: 2px solid var(--line); background: var(--paper); color: var(--ink); font-variant-numeric: tabular-nums; }
+.age-in.small { font-size: 1rem; padding: 6px 10px; }
+.age-in:focus { outline: 3px solid var(--pen); outline-offset: 1px; }
+.coef { color: var(--muted); font-size: .85rem; }
+.hint-left { margin: 0; color: var(--muted); font-size: .85rem; }
+.age-note { margin: 0; color: var(--muted); }
 .mini-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .admin { display: flex; flex-direction: column; gap: 16px; }
 .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
@@ -245,6 +266,12 @@ tbody tr:first-child td { background: var(--pen-soft); }
 .none { color: var(--muted); }
 .empty { color: var(--muted); margin: 0; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.dictee-say { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.dictee-say .big-btn { font-size: 1.1rem; padding: 10px 20px; }
+.cursive, .dictee-in, .dictee-fix { font-family: "Playwrite FR Trad", "Segoe Script", "Brush Script MT", cursive; font-weight: 400; letter-spacing: 0; font-feature-settings: "calt" 1, "liga" 1; }
+.dictee-in { text-transform: lowercase; font-size: clamp(1.5rem, 7vw, 2.2rem); line-height: 1.9; text-align: center; width: 100%; max-width: 460px; padding: 6px 14px; border-radius: 14px; border: 3px solid var(--pen); background: var(--paper); color: var(--ink); }
+.dictee-in:focus { outline: 3px solid var(--pen); outline-offset: 2px; }
+.dictee-fix { min-height: 2.4em; line-height: 1.9; font-size: 1.4rem; color: var(--red); text-align: center; }
 </style>
 
 <!-- Écran de chargement : affiché tout de suite, avant que le reste (musiques) n'arrive -->
@@ -274,8 +301,16 @@ const BELTS = [
   { min: 30, name: "Rouge",   color: "#d23b34" },
   { min: 35, name: "Noire",   color: "#111111" },
 ];
-const RANGES = ["jusqu'à 4", "5 à 9", "10 à 14", "15 à 19", "20 à 24", "25 à 29", "30 à 34", "35 et +"];
-const belt = n => BELTS.filter(b => n >= b.min).pop();
+// Seuils adaptés à l'âge du joueur : − de 10 ans −10 %, 10 à 15 ans 0 %, + de 15 ans +70 %
+const coefForAge = a => a == null ? 1 : a < 10 ? 0.9 : a <= 15 ? 1 : 1.7;
+const coefText = a => a == null ? "âge non renseigné : 0 %" : a < 10 ? "−10 %" : a <= 15 ? "0 %" : "+70 %";
+const seuil = (min, who) => Math.round(min * coefForAge(ageOf(who)));
+const belt = (n, who = player) => BELTS.filter(b => n >= seuil(b.min, who)).pop();
+// Texte des tranches (« 5 à 9 », « 35 et + ») recalculé avec les seuils du joueur ; liste triée du plus petit seuil au plus grand
+function rangesFor(list, who) {
+  const mins = list.map(x => seuil(x.min, who));
+  return mins.map((lo, i) => i === mins.length - 1 ? `${lo} et +` : i === 0 && lo === 0 ? `jusqu'à ${mins[1] - 1}` : `${lo} à ${mins[i + 1] - 1}`);
+}
 const app = document.getElementById("app");
 const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(0, i); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -285,7 +320,7 @@ const MEDALS = [
   { min: 9,  name: "Médaille d'argent", short: "Argent", color: "#b9c0c9", range: "9 à 12" },
   { min: 6,  name: "Médaille de bronze", short: "Bronze", color: "#c47e45", range: "6 à 8" },
 ];
-const medal = (n, table = MEDALS) => table.find(m => n >= m.min) || null;
+const medal = (n, who = player) => MEDALS.find(m => n >= seuil(m.min, who)) || null;
 const medalSVG = (m, size = 64) => `<svg width="${size}" height="${size * 1.3}" viewBox="0 0 50 65" aria-hidden="true"><path d="M14 0 L22 22 L28 22 L20 0 Z" fill="#c8332f"/><path d="M36 0 L28 22 L22 22 L30 0 Z" fill="#2f6fcf"/><circle cx="25" cy="42" r="20" fill="${m.color}" stroke="rgba(0,0,0,.25)" stroke-width="2"/><circle cx="25" cy="42" r="14" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="2"/><path d="M25 32 l3 6.5 7 .8 -5.2 4.8 1.4 7 -6.2-3.5 -6.2 3.5 1.4-7 -5.2-4.8 7-.8z" fill="rgba(255,255,255,.75)"/></svg>`;
 
 /* ---------- Créatures (dessins originaux) : 500 espèces × 3 stades = 1500 ---------- */
@@ -413,7 +448,14 @@ function loadPlayers() { try { const p = JSON.parse(localStorage.getItem(PLAYERS
 function savePlayers(p) { try { localStorage.setItem(PLAYERS_KEY, JSON.stringify(p)); } catch (e) {} }
 let player = loadPlayers().current;
 const dexKey = name => "defi2min-collection:" + name;
-function dexOf(name) { try { return JSON.parse(localStorage.getItem(dexKey(name))) || {}; } catch (e) { return {}; } }
+// Collection « brute » : nombre total de captures par créature (ne fait qu'augmenter, ce qui permet la synchro)
+function rawDexOf(name) { try { return JSON.parse(localStorage.getItem(dexKey(name))) || {}; } catch (e) { return {}; } }
+// Collection réelle : captures moins créatures détruites par une méga créature
+function dexOf(name) {
+  const raw = rawDexOf(name), lost = loadPertes()[name] || {}, out = {};
+  Object.keys(raw).forEach(id => { const n = (raw[id] || 0) - (lost[id] || 0); if (n > 0) out[id] = n; });
+  return out;
+}
 // Collection d'avant les pseudos : elle revient au premier joueur créé.
 function legacyDex() {
   try {
@@ -430,6 +472,16 @@ function markPlayer(name, del) {
   const e = loadEtat(); e[name.toLowerCase()] = { at: Date.now(), del };
   try { localStorage.setItem(ETAT_KEY, JSON.stringify(e)); } catch (x) {}
 }
+/* Âge de chaque joueur : { pseudo: { age, at } } — « at » sert à garder la modification la plus récente lors de la synchro */
+const AGES_KEY = "defi2min-ages";
+function loadAges() { try { return JSON.parse(localStorage.getItem(AGES_KEY)) || {}; } catch (e) { return {}; } }
+function saveAges(a) { try { localStorage.setItem(AGES_KEY, JSON.stringify(a)); } catch (e) {} }
+const ageOf = name => { if (name == null) return null; const e = loadAges()[name]; return e && e.age != null ? e.age : null; };
+function setAge(name, age) {
+  const a = loadAges();
+  a[name] = { age: age == null ? null : age, at: Date.now() };
+  saveAges(a);
+}
 function deletePlayer(name) {
   const p = loadPlayers(), low = name.toLowerCase();
   p.list = p.list.filter(n => n !== name);
@@ -438,6 +490,9 @@ function deletePlayer(name) {
   savePlayers(p);
   try {
     localStorage.removeItem(dexKey(name));
+    const ag = loadAges(); delete ag[name]; saveAges(ag);
+    const mg = loadMegas(); delete mg[name]; saveJSON(MEGAS_KEY, mg);
+    const pe = loadPertes(); delete pe[name]; saveJSON(PERTES_KEY, pe);
     localStorage.removeItem(settingsKey(name)); localStorage.removeItem("defi2min-reglages-maj:" + name);
     localStorage.removeItem("defi2min-collection"); localStorage.removeItem("defi2min-dex");   // anciennes collections déjà reprises par le premier joueur
     const all = loadScores();
@@ -446,8 +501,9 @@ function deletePlayer(name) {
   } catch (e) {}
   markPlayer(name, true);
 }
-function choosePlayer(name) {
+function choosePlayer(name, age) {
   const p = loadPlayers(), same = p.list.find(n => n.toLowerCase() === name.toLowerCase());
+  if (age != null) setAge(same || name, age);
   if (same) name = same;
   else {
     if (loadEtat()[name.toLowerCase()]) markPlayer(name, false);   // joueur recréé après suppression
@@ -458,10 +514,44 @@ function choosePlayer(name) {
 }
 function loadDex() { return player ? dexOf(player) : {}; }
 function addCatch(id) {
-  const d = loadDex(), isNew = !d[id];
+  const isNew = !loadDex()[id], d = rawDexOf(player);
   d[id] = (d[id] || 0) + 1;
   try { localStorage.setItem(dexKey(player), JSON.stringify(d)); } catch (e) {}
   return isNew;
+}
+
+/* ---------- Méga créatures : gagnées avec une ceinture noire ou une médaille d'or ---------- */
+const MEGAS_KEY = "defi2min-megas", PERTES_KEY = "defi2min-pertes", ATTAQUES_KEY = "defi2min-attaques";
+const MEGA_DEGATS = 20;
+const loadJSON = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) || def; } catch (e) { return def; } };
+const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+function loadMegas() { return loadJSON(MEGAS_KEY, {}); }          // { joueur: [ { uid, id, at, from, usedAt, usedOn } ] }
+function loadPertes() { return loadJSON(PERTES_KEY, {}); }        // { joueur: { idCréature: nombre de captures détruites } }
+function loadAttaques() { return loadJSON(ATTAQUES_KEY, []); }    // [ { uid, by, target, mega, ids, at } ]
+const megaName = id => "Méga-" + CREA(id).name;
+const megaSVG = (id, size = 80) => `<span class="mega-wrap">${creatureSVG(id, size)}<span class="mega-tag">MÉGA</span></span>`;
+function grantMega(from) {
+  const all = loadMegas(), mega = { uid: Date.now().toString(36) + Math.random().toString(36).slice(2, 7), id: rnd(0, NB_ESPECES - 1) * 3 + 2, at: Date.now(), from };
+  (all[player] = all[player] || []).push(mega);
+  saveJSON(MEGAS_KEY, all);
+  return mega;
+}
+const megaWonHTML = mega => mega ? `<div class="mega-won">${megaSVG(mega.id, 96)}<div><strong>Méga créature gagnée : ${megaName(mega.id)} !</strong><br><small>Va dans ta collection pour l'utiliser : elle détruit ${MEGA_DEGATS} créatures d'un autre joueur.</small></div></div>` : "";
+// Détruit au hasard jusqu'à 20 créatures de la cible ; renvoie les créatures détruites
+function useMega(uid, target) {
+  const all = loadMegas(), mega = (all[player] || []).find(m => m.uid === uid);
+  if (!mega || mega.usedAt) return null;
+  const eff = dexOf(target), raw = rawDexOf(target);
+  const ids = shuffle(Object.keys(eff)).slice(0, MEGA_DEGATS);
+  const pertes = loadPertes(), lost = pertes[target] = pertes[target] || {};
+  ids.forEach(id => { lost[id] = raw[id] || 0; });   // toutes les captures de cette créature disparaissent
+  saveJSON(PERTES_KEY, pertes);
+  mega.usedAt = Date.now(); mega.usedOn = target;
+  saveJSON(MEGAS_KEY, all);
+  const att = loadAttaques();
+  att.push({ uid: mega.uid, by: player, target, mega: mega.id, ids: ids.map(Number), at: mega.usedAt });
+  saveJSON(ATTAQUES_KEY, att.slice(-100));
+  return ids.map(Number);
 }
 const stagesDone = (d, sp) => d[sp * 3] ? (d[sp * 3 + 1] ? (d[sp * 3 + 2] ? 3 : 2) : 1) : 0;
 // Choisit une espèce ; si elle a déjà été attrapée, on propose son évolution suivante.
@@ -528,7 +618,7 @@ function bindDex(d) {
 }
 
 const KEY = "defi2min-scores";
-function loadScores() { try { const s = JSON.parse(localStorage.getItem(KEY)) || {}; return { calc: s.calc || [], num: s.num || [], sous: s.sous || [], mult: s.mult || [], plus: s.plus || [] }; } catch (e) { return { calc: [], num: [], sous: [], mult: [], plus: [] }; } }
+function loadScores() { try { const s = JSON.parse(localStorage.getItem(KEY)) || {}; return { calc: s.calc || [], num: s.num || [], sous: s.sous || [], mult: s.mult || [], plus: s.plus || [], dictee: s.dictee || [] }; } catch (e) { return { calc: [], num: [], sous: [], mult: [], plus: [], dictee: [] }; } }
 function addScore(mode, score, total) {
   const all = loadScores(), entry = { score, total, date: Date.now(), who: player };
   all[mode] = [...all[mode], entry].sort((a, b) => b.score - a.score || a.date - b.date).slice(0, 10);
@@ -702,7 +792,7 @@ function startTimer(onEnd) {
 /* ---------- Menu ---------- */
 function menu() {
   clearInterval(timer); document.onkeydown = null;
-  const sc = loadScores(), best = { calc: sc.calc[0]?.score, num: sc.num[0]?.score, sous: sc.sous[0]?.score, mult: sc.mult[0]?.score, plus: sc.plus[0]?.score };
+  const sc = loadScores(), best = { calc: sc.calc[0]?.score, num: sc.num[0]?.score, sous: sc.sous[0]?.score, mult: sc.mult[0]?.score, plus: sc.plus[0]?.score, dictee: sc.dictee[0]?.score };
   app.innerHTML = `
     <div class="title-row"><h1>Défi <span>2 minutes</span></h1><div class="mini-row"><button class="ghost mini" id="go-admin">Réglages</button><button class="ghost mini" id="go-players">Changer de joueur</button><button class="ghost mini" id="go-account">Compte</button></div></div>
     <header class="top"><p class="lead">Chaque bonne réponse attrape une créature sauvage. Combien vas-tu en attraper en 2 minutes ?</p><div class="parade">${creatureSVG(0, 58)}${creatureSVG(1, 68)}${creatureSVG(2, 80)}</div></header>
@@ -712,50 +802,58 @@ function menu() {
         <h2>Calcul mental</h2>
         <div class="ex">8 + 2 = ? · 10 − 7 = ? · 6 + 5 = ?</div>
         <p>Connaître les compléments à ${settings.calc.cible} : additions et soustractions.</p>
-        <div class="best">Meilleur score : ${best.calc != null ? best.calc + " bonnes réponses · ceinture " + belt(best.calc).name : "pas encore joué"}</div>
+        <div class="best">Meilleur score : ${best.calc != null ? best.calc + " bonnes réponses · ceinture " + belt(best.calc, sc.calc[0]?.who).name : "pas encore joué"}</div>
         <span class="go">Commencer</span>
       </button>
       <button class="mode" id="go-plus">
         <h2>Calcul mental +</h2>
         <div class="ex">8 + 2 = ? · 10 − 7 = ? · 3 × 6 = ?</div>
         <p>Les calculs du calcul mental et des multiplications, mélangés.</p>
-        <div class="best">Meilleur score : ${best.plus != null ? best.plus + " bonnes réponses · ceinture " + belt(best.plus).name : "pas encore joué"}</div>
+        <div class="best">Meilleur score : ${best.plus != null ? best.plus + " bonnes réponses · ceinture " + belt(best.plus, sc.plus[0]?.who).name : "pas encore joué"}</div>
         <span class="go">Commencer</span>
       </button>
       <button class="mode" id="go-num">
         <h2>Les nombres jusqu'à 99</h2>
         <div class="ex">5d 4u · 50 + 4 · cinquante-quatre</div>
         <p>Compte les paquets de 10 et les unités, puis barre les étiquettes fausses.</p>
-        <div class="best">Meilleur score : ${best.num != null ? best.num + " exercices réussis" + (medal(best.num) ? " · " + medal(best.num).name.toLowerCase() : "") : "pas encore joué"}</div>
+        <div class="best">Meilleur score : ${best.num != null ? best.num + " exercices réussis" + (medal(best.num, sc.num[0]?.who) ? " · " + medal(best.num, sc.num[0]?.who).name.toLowerCase() : "") : "pas encore joué"}</div>
         <span class="go">Commencer</span>
       </button>
       <button class="mode" id="go-sous">
         <h2>Soustractions</h2>
         <div class="ex">9 − 4 = ? · 7 − 3 = ? · 10 − 6 = ?</div>
         <p>Soustractions avec des nombres jusqu'à ${settings.sous.max}.</p>
-        <div class="best">Meilleur score : ${best.sous != null ? best.sous + " bonnes réponses · ceinture " + belt(best.sous).name : "pas encore joué"}</div>
+        <div class="best">Meilleur score : ${best.sous != null ? best.sous + " bonnes réponses · ceinture " + belt(best.sous, sc.sous[0]?.who).name : "pas encore joué"}</div>
         <span class="go">Commencer</span>
       </button>
       <button class="mode" id="go-mult">
         <h2>Multiplications</h2>
         <div class="ex">4 × 2 = ? · 3 × 7 = ? · 9 × 3 = ?</div>
         <p>${tablesText(settings.mult.tables)}.</p>
-        <div class="best">Meilleur score : ${best.mult != null ? best.mult + " bonnes réponses" + (medal(best.mult) ? " · " + medal(best.mult).name.toLowerCase() : "") : "pas encore joué"}</div>
+        <div class="best">Meilleur score : ${best.mult != null ? best.mult + " bonnes réponses" + (medal(best.mult, sc.mult[0]?.who) ? " · " + medal(best.mult, sc.mult[0]?.who).name.toLowerCase() : "") : "pas encore joué"}</div>
         <span class="go">Commencer</span>
       </button>
-
+      <button class="mode" id="go-dictee">
+        <h2>Dictée</h2>
+        <div class="ex">🔊 écoute · écris</div>
+        <p>Écoute le mot, puis écris-le : pas de chrono, il faut écrire tous les mots de la liste.</p>
+        <div class="best">Meilleur score : ${best.dictee != null ? best.dictee + " mots bien écrits" + (medalDictee(best.dictee, sc.dictee[0]?.total) ? " · " + medalDictee(best.dictee, sc.dictee[0]?.total).name.toLowerCase() : "") : "pas encore joué"}</div>
+        <span class="go">Commencer</span>
+      </button>
     </div>
+    <p class="age-note">Récompenses adaptées à l'âge de <strong>${esc(player)}</strong>${ageOf(player) != null ? ` (${ageOf(player)} ans)` : ""} : ${coefText(ageOf(player))}.</p>
     <section class="belts"><h3>Couleur de ceinture (calcul mental, soustractions et calcul mental +)</h3><div class="belt-row">
-      ${BELTS.map((b, i) => `<div class="belt-chip"><span class="sw" style="background:${b.color}"></span><span>${b.name}<br><small>${RANGES[i]}</small></span></div>`).join("")}
+      ${BELTS.map((b, i) => `<div class="belt-chip"><span class="sw" style="background:${b.color}"></span><span>${b.name}<br><small>${rangesFor(BELTS, player)[i]}</small></span></div>`).join("")}
     </div></section>
-    <section class="belts"><h3>Médailles (nombres jusqu'à 99 et multiplications)</h3><div class="belt-row">
-      ${MEDALS.map(m => `<div class="belt-chip">${medalSVG(m, 22)}<span>${m.name}<br><small>${m.range} réponses justes</small></span></div>`).join("")}
+    <section class="belts"><h3>Médailles (nombres jusqu'à 99, multiplications et dictée)</h3><div class="belt-row">
+      ${MEDALS.map((m, i) => `<div class="belt-chip">${medalSVG(m, 22)}<span>${m.name}<br><small>${rangesFor([...MEDALS].reverse(), player).reverse()[i]} réponses justes</small></span></div>`).join("")}
     </div></section>`;
   document.getElementById("go-calc").onclick = () => calcGame("calc");
   document.getElementById("go-sous").onclick = () => calcGame("sous");
   document.getElementById("go-mult").onclick = () => calcGame("mult");
   document.getElementById("go-plus").onclick = () => calcGame("plus");
   document.getElementById("go-num").onclick = numGame;
+  document.getElementById("go-dictee").onclick = dicteeMenu;
   document.getElementById("go-scores").onclick = scoresPage;
   document.getElementById("go-dex").onclick = collectionPage;
   document.getElementById("go-players").onclick = playersPage;
@@ -795,7 +893,7 @@ function adminPage() {
       <div class="actions"><button class="big-btn" type="submit">Enregistrer</button><button class="big-btn alt" type="button" id="a-reset">Remettre les valeurs de départ</button></div>
     </form>
     <section class="review"><h3>Joueurs <small>${pl.length ? "supprime un joueur et tous ses résultats" : ""}</small></h3>
-      ${pl.length ? pl.map((n, i) => { const d = dexOf(n), c = Object.keys(d).filter(k => d[k] > 0).length; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #d6e4fb"><span><strong>${esc(n)}</strong> <small>${c} / ${NB_ESPECES * 3} créatures</small></span><button type="button" class="ghost mini" data-del="${i}">Supprimer</button></div>`; }).join("") : "<p>Aucun joueur pour l'instant.</p>"}
+      ${pl.length ? pl.map((n, i) => { const d = dexOf(n), c = Object.keys(d).filter(k => d[k] > 0).length; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #d6e4fb"><span><strong>${esc(n)}</strong> <small>${c} / ${NB_ESPECES * 3} créatures</small></span><span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end"><label for="a-age${i}" class="coef">Âge</label><input class="age-in small" type="number" id="a-age${i}" data-age="${i}" min="3" max="120" inputmode="numeric" value="${ageOf(n) ?? ""}" placeholder="?"><span class="coef" id="a-coef${i}">${coefText(ageOf(n))}</span><button type="button" class="ghost mini" data-del="${i}">Supprimer</button></span></div>`; }).join("") + `<p class="hint-left">L'âge adapte le nombre de réponses demandé pour les ceintures et les médailles : moins de 10 ans −10 %, 10 à 15 ans 0 %, plus de 15 ans +70 %. Il est enregistré dès que tu le modifies.</p>` : "<p>Aucun joueur pour l'instant.</p>"}
       <p class="saved" id="p-ok" hidden></p>
     </section>
     <section class="review"><h3>Synchronisation <small>${account ? esc(account.email) : "aucun compte connecté"}</small></h3>
@@ -830,6 +928,17 @@ function adminPage() {
     document.getElementById("a-ok").textContent = "Valeurs de départ remises."; document.getElementById("a-ok").hidden = false;
   };
   document.getElementById("back").onclick = menu;
+  // Âge : coefficient mis à jour pendant la saisie, enregistré quand on quitte la case
+  document.querySelectorAll("[data-age]").forEach(el => {
+    const name = pl[el.dataset.age], coef = document.getElementById("a-coef" + el.dataset.age);
+    el.oninput = () => { coef.textContent = coefText(el.value === "" ? null : Number(el.value)); };
+    el.onchange = () => {
+      const ok = document.getElementById("p-ok"), a = el.value === "" ? null : Number(el.value);
+      if (a != null && !(Number.isInteger(a) && a >= 3 && a <= 120)) { ok.textContent = `Âge de ${name} : choisis un nombre entre 3 et 120.`; ok.hidden = false; el.value = ageOf(name) ?? ""; coef.textContent = coefText(ageOf(name)); return; }
+      setAge(name, a);
+      ok.textContent = a == null ? `Âge de ${name} effacé.` : `Âge de ${name} enregistré : ${a} ans (${coefText(a)}).`; ok.hidden = false;
+    };
+  });
   document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
     const name = pl[b.dataset.del];
     if (!confirm("Supprimer le joueur « " + name + " » ?\n\nSes créatures et ses scores seront effacés" + (account ? " sur tous les appareils connectés au compte." : " de cet appareil.") + "\nCette action est définitive.")) return;
@@ -858,22 +967,25 @@ function playersPage() {
   const card = (n, i) => {
     const d = dexOf(n), ids = Object.keys(d).filter(k => d[k] > 0).map(Number);
     const face = ids.length ? Math.max(...ids.filter(id => id % 3 === Math.max(...ids.map(x => x % 3)))) : 0;
-    return `<button class="tile player${n === player ? " on" : ""}" data-i="${i}"><span class="${ids.length ? "" : "unknown"}">${creatureSVG(face, 56)}</span><strong>${esc(n)}</strong><small>${ids.length} / ${NB_ESPECES * 3} créatures</small></button>`;
+    return `<button class="tile player${n === player ? " on" : ""}" data-i="${i}"><span class="${ids.length ? "" : "unknown"}">${creatureSVG(face, 56)}</span><strong>${esc(n)}</strong><small>${ageOf(n) != null ? ageOf(n) + " ans · " : ""}${ids.length} / ${NB_ESPECES * 3} créatures</small></button>`;
   };
   app.innerHTML = `
     <header class="top"><div><h1>Qui <span>joue ?</span></h1><p class="lead">Sélectionne ton joueur ou entre un nouveau nom.</p></div>${player ? `<button class="big-btn alt" id="back">Menu</button>` : ""}</header>
     <form class="pseudo" id="pf">
       <label for="pseudo">Nouveau joueur</label>
-      <div class="row"><input id="pseudo" maxlength="16" placeholder="Écris ton pseudo" autocomplete="off"><button class="big-btn" type="submit">C'est moi !</button></div>
-      <p class="err" id="err" hidden>Écris un pseudo d'au moins 2 lettres.</p>
+      <div class="row"><input id="pseudo" maxlength="16" placeholder="Écris ton pseudo" autocomplete="off"><input id="age" class="age-in" type="number" min="3" max="120" inputmode="numeric" placeholder="Âge" aria-label="Âge"><button class="big-btn" type="submit">C'est moi !</button></div>
+      <p class="err" id="err" hidden></p>
     </form>
     <p style="margin:0"><button class="ghost mini" id="go-account">${account ? "Compte : " + esc(account.email) : "Se connecter / créer un compte"}</button></p>
     ${p.list.length ? `<section class="review"><h3>Joueurs déjà inscrits <small>touche ton pseudo pour jouer</small></h3><div class="players">${p.list.map(card).join("")}</div></section>` : ""}`;
   document.getElementById("pf").onsubmit = e => {
     e.preventDefault();
     const v = document.getElementById("pseudo").value.trim().replace(/\s+/g, " ");
-    if (v.length < 2) { document.getElementById("err").hidden = false; return; }
-    choosePlayer(v); menu();
+    const age = Number(document.getElementById("age").value);
+    const fail = msg => { const el = document.getElementById("err"); el.textContent = msg; el.hidden = false; };
+    if (v.length < 2) return fail("Écris un pseudo d'au moins 2 lettres.");
+    if (!Number.isInteger(age) || age < 3 || age > 120) return fail("Indique ton âge (un nombre entre 3 et 120).");
+    choosePlayer(v, age); menu();
   };
   document.querySelectorAll(".player").forEach(b => b.onclick = () => { choosePlayer(p.list[b.dataset.i]); menu(); });
   const back = document.getElementById("back"); if (back) back.onclick = menu;
@@ -885,10 +997,10 @@ function scoresPage() {
   clearInterval(timer); document.onkeydown = null;
   const sc = loadScores();
   const table =(list, mode) => list.length ? `<div class="tbl"><table>
-      <thead><tr><th>Place</th><th>Joueur</th><th>Score</th><th>${mode === "num" || mode === "mult" ? "Médaille" : "Ceinture"}</th><th>Date et heure</th></tr></thead>
+      <thead><tr><th>Place</th><th>Joueur</th><th>Score</th><th>${mode === "num" || mode === "mult" || mode === "dictee" ? "Médaille" : "Ceinture"}</th><th>Date et heure</th></tr></thead>
       <tbody>${list.map((s, i) => {
-        const usesMedal = mode === "num" || mode === "mult";
-        const r = usesMedal ? medal(s.score) : belt(s.score);
+        const usesMedal = mode === "num" || mode === "mult" || mode === "dictee";
+        const r = mode === "dictee" ? medalDictee(s.score, s.total) : usesMedal ? medal(s.score, s.who) : belt(s.score, s.who);
         const award = !usesMedal ? `<span class="sw" style="background:${r.color}"></span>${r.name}` : (r ? `${medalSVG(r, 18)}${r.short}` : `<span class="none">—</span>`);
         return `<tr><td class="pl">${i + 1}</td><td class="who-cell">${s.who ? esc(s.who) : "—"}</td><td><strong>${s.score}</strong> <small>/ ${s.total}</small></td><td><span class="aw">${award}</span></td><td>${fmtDate(s.date)}</td></tr>`;
       }).join("")}</tbody></table></div>` : `<p class="empty">Aucune partie terminée pour l'instant. Joue une partie pour voir ton score ici.</p>`;
@@ -898,7 +1010,8 @@ function scoresPage() {
     <section class="review"><h3>Les nombres jusqu'à 99</h3>${table(sc.num, "num")}</section>
     <section class="review"><h3>Soustractions</h3>${table(sc.sous, "sous")}</section>
     <section class="review"><h3>Multiplications</h3>${table(sc.mult, "mult")}</section>
-    <section class="review"><h3>Calcul mental +</h3>${table(sc.plus, "plus")}</section>`;
+    <section class="review"><h3>Calcul mental +</h3>${table(sc.plus, "plus")}</section>
+    <section class="review"><h3>Dictée</h3>${table(sc.dictee, "dictee")}</section>`;
   document.getElementById("back").onclick = menu;
 }
 
@@ -908,9 +1021,58 @@ function collectionPage() {
   const dex = loadDex();
   app.innerHTML = `
     <header class="top"><div><h1>Ma <span>collection</span></h1><p class="lead">Toutes les créatures attrapées par ${esc(player)}.</p></div><button class="big-btn alt" id="back">Menu</button></header>
+    ${megaSectionHTML()}
     ${dexHTML(dex)}`;
   bindDex(dex);
+  bindMegas();
   document.getElementById("back").onclick = menu;
+}
+
+/* ---------- Méga créatures dans la collection : choisir, viser un joueur, confirmer ---------- */
+function megaSectionHTML() {
+  const mine = (loadMegas()[player] || []).slice().sort((a, b) => (a.usedAt ? 1 : 0) - (b.usedAt ? 1 : 0) || b.at - a.at);
+  const recues = loadAttaques().filter(a => a.target === player).slice(-5).reverse();
+  const date = t => new Date(t).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+  return `<section class="review" id="megas"><h3>Méga créatures <small>${mine.filter(m => !m.usedAt).length} à utiliser</small></h3>
+    ${mine.length ? `<div class="mega-list">${mine.map(m => `<button type="button" class="mega-card${m.usedAt ? " used" : ""}" data-mega="${m.uid}"${m.usedAt ? " disabled" : ""}>
+        ${megaSVG(m.id, 70)}<strong>${megaName(m.id)}</strong>
+        <small>${m.usedAt ? `utilisée contre ${esc(m.usedOn)} le ${date(m.usedAt)}` : `${esc(m.from || "")} · touche pour l'utiliser`}</small></button>`).join("")}</div>`
+      : `<p class="empty">Gagne une ceinture noire ou une médaille d'or pour obtenir une méga créature. Elle détruit ${MEGA_DEGATS} créatures d'un autre joueur.</p>`}
+    <div id="mega-panel"></div>
+    ${recues.length ? `<div class="mega-hits"><p class="lbl">Attaques reçues</p>${recues.map(a => `<p>${megaSVG(a.mega, 28)} <strong>${esc(a.by)}</strong> a utilisé ${megaName(a.mega)} le ${date(a.at)} : ${a.ids.length} créature${a.ids.length > 1 ? "s" : ""} détruite${a.ids.length > 1 ? "s" : ""}.</p>`).join("")}</div>` : ""}
+  </section>`;
+}
+function bindMegas() {
+  const panel = document.getElementById("mega-panel");
+  const others = () => loadPlayers().list.filter(n => n !== player);
+  const pickTarget = uid => {
+    const m = (loadMegas()[player] || []).find(x => x.uid === uid);
+    document.querySelectorAll(".mega-card").forEach(c => c.classList.toggle("on", c.dataset.mega === uid));
+    const list = others();
+    panel.innerHTML = `<div class="mega-step"><p><strong>${megaName(m.id)}</strong> : sur quel joueur veux-tu l'utiliser ?</p>
+      ${list.length ? `<div class="players">${list.map((n, i) => { const c = Object.keys(dexOf(n)).length;
+        return `<button type="button" class="tile" data-target="${i}"${c ? "" : " disabled"}><strong>${esc(n)}</strong><small>${c} créature${c > 1 ? "s" : ""}</small></button>`; }).join("")}</div>`
+        : `<p class="empty">Il n'y a pas d'autre joueur. Crée un autre profil (ou connecte un compte avec d'autres joueurs) pour utiliser ta méga créature.</p>`}
+      <div class="actions"><button type="button" class="big-btn alt" id="mega-cancel">Annuler</button></div></div>`;
+    panel.querySelectorAll("[data-target]").forEach(b => b.onclick = () => confirmTarget(uid, list[b.dataset.target]));
+    document.getElementById("mega-cancel").onclick = reset;
+    panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
+  const confirmTarget = (uid, target) => {
+    const m = (loadMegas()[player] || []).find(x => x.uid === uid), c = Object.keys(dexOf(target)).length, n = Math.min(MEGA_DEGATS, c);
+    panel.innerHTML = `<div class="mega-step attack"><p>${megaSVG(m.id, 56)}<strong>Utiliser ${megaName(m.id)} contre ${esc(target)} ?</strong><br>
+      ${n} créature${n > 1 ? "s" : ""} de ${esc(target)} ser${n > 1 ? "ont" : "a"} détruite${n > 1 ? "s" : ""} au hasard. La méga créature ne pourra plus servir.</p>
+      <div class="actions"><button type="button" class="big-btn" id="mega-go">Oui, attaquer</button><button type="button" class="big-btn alt" id="mega-back">Non, choisir un autre joueur</button></div></div>`;
+    document.getElementById("mega-back").onclick = () => pickTarget(uid);
+    document.getElementById("mega-go").onclick = () => {
+      const ids = useMega(uid, target);
+      if (!ids) return reset();
+      collectionPage();
+      document.getElementById("mega-panel").innerHTML = `<div class="mega-step done"><p><strong>Attaque réussie !</strong> ${ids.length} créature${ids.length > 1 ? "s" : ""} de ${esc(target)} ${ids.length > 1 ? "ont" : "a"} été détruite${ids.length > 1 ? "s" : ""} :</p><div class="catch-list">${ids.map(id => `<span class="cbox">${creatureSVG(id, 44)}</span>`).join("")}</div></div>`;
+    };
+  };
+  const reset = () => { panel.innerHTML = ""; document.querySelectorAll(".mega-card").forEach(c => c.classList.remove("on")); };
+  document.querySelectorAll(".mega-card:not([disabled])").forEach(c => c.onclick = () => pickTarget(c.dataset.mega));
 }
 
 /* ---------- Calcul mental ---------- */
@@ -1019,12 +1181,15 @@ function endCalc(hist, kind) {
   const rank = hist.length ? addScore(kind, good, hist.length) : null;
   const award = !GAMES[kind].medals
     ? `<div class="belt-big"><span class="sw" style="background:${b.color}"></span><strong>Ceinture obtenue : ${b.name}</strong></div>`
-    : m ? `<div class="belt-big">${medalSVG(m)}<strong>${m.name} !</strong></div>` : `<p class="rank-none">Pas encore de médaille : il faut 6 bonnes réponses pour le bronze.</p>`;
+    : m ? `<div class="belt-big">${medalSVG(m)}<strong>${m.name} !</strong></div>` : `<p class="rank-none">Pas encore de médaille : il faut ${seuil(6, player)} bonnes réponses pour le bronze.</p>`;
+  const top = GAMES[kind].medals ? (m && m.short === "Or") : b.name === "Noire";
+  const mega = top ? grantMega(`${GAMES[kind].medals ? "Médaille d'or" : "Ceinture noire"} · ${GAMES[kind].title}`) : null;
   app.innerHTML = `
     <div class="result">
       <h2>Score</h2>
       <div class="score-ring"><div>${good}<small>/ ${hist.length}</small></div></div>
       ${award}
+      ${megaWonHTML(mega)}
       ${rankMsg(rank)}
       <div class="actions"><button class="big-btn" id="again">Rejouer</button><button class="big-btn alt" id="scores">Meilleurs scores</button><button class="big-btn alt" id="back">Menu</button></div>
     </div>
@@ -1124,18 +1289,140 @@ function numGame() {
 function endNum(hist) {
   clearInterval(timer); musicMode("menu");
   const good = hist.filter(h => h.ok).length;
-  const rank = hist.length ? addScore("num", good, hist.length) : null, m = medal(good);  app.innerHTML = `
+  const rank = hist.length ? addScore("num", good, hist.length) : null, m = medal(good);
+  const mega = m && m.short === "Or" ? grantMega("Médaille d'or · Les nombres jusqu'à 99") : null;
+  app.innerHTML = `
     <div class="result">
       <h2>Score</h2>
       <div class="score-ring"><div>${good}<small>/ ${hist.length}</small></div></div>
       <strong>${good} exercice${good > 1 ? "s" : ""} réussi${good > 1 ? "s" : ""} sans erreur</strong>
-      ${m ? `<div class="belt-big">${medalSVG(m)}<strong>${m.name} !</strong></div>` : `<p class="rank-none">Pas encore de médaille : il faut 6 exercices justes pour le bronze.</p>`}
+      ${m ? `<div class="belt-big">${medalSVG(m)}<strong>${m.name} !</strong></div>` : `<p class="rank-none">Pas encore de médaille : il faut ${seuil(6, player)} exercices justes pour le bronze.</p>`}
+      ${megaWonHTML(mega)}
       ${rankMsg(rank)}
       <div class="actions"><button class="big-btn" id="again">Rejouer</button><button class="big-btn alt" id="scores">Meilleurs scores</button><button class="big-btn alt" id="back">Menu</button></div>
     </div>
     ${caughtHTML(hist)}
     ${hist.length ? `<section class="review"><h3>Correction</h3>${hist.map(h => `<p class="${h.ok ? "ok" : "ko"}" style="color:var(--${h.ok ? "green" : "red"})">${h.ok ? "✓" : "✗"} <strong>${h.n}</strong> · étiquettes fausses : ${h.faux.join(" ; ")}</p>`).join("")}</section>` : ""}`;
   document.getElementById("again").onclick = numGame;
+  document.getElementById("scores").onclick = scoresPage;
+  document.getElementById("back").onclick = menu;
+}
+
+/* ---------- Dictée : le joueur écoute un mot (voix du téléphone) et doit l'écrire ---------- */
+const DICTEES = [
+  { id: "a",  titre: "Liste 1 · le son « a »",  son: "a",  mots: ["un ami", "maman", "un lapin", "mardi", "samedi", "un pirate", "il va", "la salade", "avec"] },
+  { id: "ou", titre: "Liste 2 · le son « ou »", son: "ou", mots: ["un jour", "il se couche", "il roule", "une boule", "il trouve", "pourquoi", "un loup", "un mouton", "la bouche"] },
+];
+let voixFr = null;
+const voixOk = () => "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
+function chercherVoix() {
+  try {
+    const vs = speechSynthesis.getVoices() || [];
+    voixFr = vs.find(v => /^fr[-_]FR$/i.test(v.lang)) || vs.find(v => /^fr/i.test(v.lang)) || null;
+  } catch (e) {}
+}
+if (voixOk()) { chercherVoix(); try { speechSynthesis.addEventListener("voiceschanged", chercherVoix); } catch (e) {} }
+function dire(texte, lent) {
+  if (!voixOk()) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(texte);
+    u.lang = "fr-FR"; if (voixFr) u.voice = voixFr;
+    u.rate = lent ? 0.55 : 0.85; u.pitch = 1; u.volume = 1;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+const normMot = s => String(s).trim().toLowerCase().replace(/[’‘]/g, "'").replace(/\s+/g, " ").replace(/[.!?,;:]+$/, "");
+
+function dicteeMenu() {
+  clearInterval(timer); document.onkeydown = null;
+  if (voixOk()) chercherVoix();
+  const best = loadScores().dictee[0];
+  const total = DICTEES.reduce((n, l) => n + l.mots.length, 0);
+  app.innerHTML = `
+    <header class="top"><div><h1>Dic<span>tée</span></h1><p class="lead">Écoute bien chaque mot, puis écris-le. Chaque mot bien écrit attrape une créature ! Pas de chrono : 0 faute = médaille d'or, 1 faute = argent, 2 fautes = bronze.</p></div><button class="big-btn alt" id="back">Menu</button></header>
+    ${!voixOk() ? `<p class="rank-none">Ce navigateur ne sait pas lire à voix haute : la dictée ne peut pas fonctionner ici.</p>`
+      : voixFr ? "" : `<p class="rank-none">Aucune voix française n'a été trouvée sur cet appareil. Dans les réglages d'Android (Synthèse vocale), installe la voix française.</p>`}
+    <div class="modes">
+      ${DICTEES.map((l, i) => `<button class="mode" data-l="${i}"><h2>${esc(l.titre)}</h2><div class="ex">🔊 le son « ${esc(l.son)} »</div><p>${l.mots.length} mots à écrire.</p><span class="go">Commencer</span></button>`).join("")}
+      ${DICTEES.length > 1 ? `<button class="mode" data-l="all"><h2>Toutes les listes</h2><div class="ex">🔊 tous les sons</div><p>${total} mots mélangés.</p><span class="go">Commencer</span></button>` : ""}
+    </div>
+    <p class="hint-left">Meilleur score : ${best ? best.score + " mot" + (best.score > 1 ? "s" : "") + " bien écrit" + (best.score > 1 ? "s" : "") + (medalDictee(best.score, best.total) ? " · " + medalDictee(best.score, best.total).name.toLowerCase() : "") : "pas encore joué"}</p>`;
+  document.getElementById("back").onclick = menu;
+  app.querySelectorAll("[data-l]").forEach(b => b.onclick = () => dicteeGame(b.dataset.l === "all" ? null : Number(b.dataset.l)));
+}
+// Dictée sans chrono : on écrit tous les mots de la liste. 0 faute : or · 1 faute : argent · 2 fautes : bronze
+const medalDictee = (good, total) => { if (!total) return null; const f = total - good; return f === 0 ? MEDALS[0] : f === 1 ? MEDALS[1] : f === 2 ? MEDALS[2] : null; };
+function dicteeGame(li) {
+  const mots = shuffle([...(li == null ? DICTEES.flatMap(l => l.mots) : DICTEES[li].mots)]);
+  const hist = []; let cur = null, locked = false, i = 0;
+  const nouveau = () => ({ mot: mots[i], cr: pickCreature(cur ? Math.floor(cur.cr / 3) : -1) });
+  app.innerHTML = `
+    <div class="bar"><div class="info"><h2>Dictée</h2><div id="count"></div></div><button class="ghost" id="stop">Arrêter</button></div>
+    <div class="card" id="card">
+      <div class="wild" id="wild"></div>
+      <div class="dictee-say"><button class="big-btn" id="say" type="button">🔊 Écouter</button><button class="big-btn alt" id="slow" type="button">🐢 Plus lentement</button></div>
+      <input class="dictee-in" id="rep" type="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="done" aria-label="Écris le mot que tu as entendu">
+      <div class="dictee-fix" id="fix"></div>
+      <button class="big-btn" id="valid" type="button">Valider</button>
+      <p class="hint">Écris ce que tu entends, puis appuie sur Valider (ou sur Entrée).</p>
+    </div>`;
+  const inp = document.getElementById("rep"), card = document.getElementById("card"), fix = document.getElementById("fix");
+  const count = () => {
+    const f = hist.filter(h => !h.ok).length;
+    document.getElementById("count").textContent = `Mot ${Math.min(i + 1, mots.length)} sur ${mots.length} · ${f} faute${f > 1 ? "s" : ""}`;
+  };
+  const showWild = () => { const w = document.getElementById("wild"); w.className = "wild"; w.innerHTML = wildHTML(cur.cr); };
+  const valider = () => {
+    if (locked) return;
+    const rep = normMot(inp.value); if (!rep) return;
+    locked = true;
+    const ok = rep === normMot(cur.mot);
+    hist.push({ mot: cur.mot, given: inp.value.trim(), ok, cr: cur.cr, isNew: ok && addCatch(cur.cr) });
+    card.classList.add(ok ? "ok" : "ko"); fix.textContent = ok ? "" : cur.mot;
+    wildEnd(ok, cur.cr); (ok ? harpe : buzz)();
+    setTimeout(() => {
+      if (!document.getElementById("card")) return;
+      i++;
+      if (i >= mots.length) return finDictee(hist, li, true);
+      card.classList.remove("ok", "ko"); fix.textContent = ""; inp.value = "";
+      cur = nouveau(); showWild(); count(); locked = false; dire(cur.mot); inp.focus();
+    }, ok ? 800 : 2400);
+  };
+  // les boutons ne volent pas le focus : le clavier reste affiché
+  ["say", "slow", "valid"].forEach(id => { document.getElementById(id).onpointerdown = e => e.preventDefault(); });
+  document.getElementById("say").onclick = () => dire(cur.mot);
+  document.getElementById("slow").onclick = () => dire(cur.mot, true);
+  document.getElementById("valid").onclick = valider;
+  inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); valider(); } };
+  document.onkeydown = null;
+  document.getElementById("stop").onclick = () => finDictee(hist, li, false);
+  clearInterval(timer); unlockAudio();
+  musicMode("silence");   // la musique s'arrête dès le lancement de la dictée
+  cur = nouveau(); showWild(); count(); dire(cur.mot); inp.focus();
+}
+function finDictee(hist, li, fini) {
+  clearInterval(timer); document.onkeydown = null; musicMode("menu");
+  try { speechSynthesis.cancel(); } catch (e) {}
+  const total = hist.length, good = hist.filter(h => h.ok).length, fautes = total - good;
+  const m = fini ? medalDictee(good, total) : null;
+  const rank = fini && total ? addScore("dictee", good, total) : null;
+  const mega = m && m.short === "Or" ? grantMega("Médaille d'or · Dictée") : null;
+  app.innerHTML = `
+    <div class="result">
+      <h2>${fini ? "Score" : "Dictée arrêtée"}</h2>
+      <div class="score-ring"><div>${good}<small>/ ${total}</small></div></div>
+      <strong>${good} mot${good > 1 ? "s" : ""} bien écrit${good > 1 ? "s" : ""} · ${fautes} faute${fautes > 1 ? "s" : ""}</strong>
+      ${m ? `<div class="belt-big">${medalSVG(m)}<strong>${m.name} !</strong></div>`
+        : `<p class="rank-none">${fini ? "Pas de médaille cette fois : il faut au plus 2 fautes (0 faute : or, 1 : argent, 2 : bronze)." : "Il faut aller jusqu'au dernier mot de la liste pour gagner une médaille."}</p>`}
+      ${megaWonHTML(mega)}
+      ${rankMsg(rank)}
+      <div class="actions"><button class="big-btn" id="again">Rejouer</button><button class="big-btn alt" id="lists">Autres listes</button><button class="big-btn alt" id="scores">Meilleurs scores</button><button class="big-btn alt" id="back">Menu</button></div>
+    </div>
+    ${caughtHTML(hist)}
+    ${hist.length ? `<section class="review"><h3>Correction</h3><ul>${hist.map(h => `<li class="${h.ok ? "ok" : "ko"}">${h.ok ? "✓" : "✗"} <span class="cursive">${h.ok ? esc(h.mot) : `<s>${esc(h.given)}</s> ${esc(h.mot)}`}</span></li>`).join("")}</ul></section>` : ""}`;
+  document.getElementById("again").onclick = () => dicteeGame(li);
+  document.getElementById("lists").onclick = dicteeMenu;
   document.getElementById("scores").onclick = scoresPage;
   document.getElementById("back").onclick = menu;
 }
@@ -1214,10 +1501,10 @@ function frErr(e) {
 /* Instantané des données du jeu, et fusion local + en ligne (on ne perd jamais rien) */
 function snapshot() {
   const p = loadPlayers(), coll = {};
-  p.list.forEach(n => { coll[n] = dexOf(n); });
+  p.list.forEach(n => { coll[n] = rawDexOf(n); });
   const rj = {};
   p.list.forEach(n => { rj[n] = { v: rawJSON(settingsKey(n)), maj: Number(localStorage.getItem(majKey(n))) || 0 }; });
-  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), etat: loadEtat(), reglagesJ: rj };
+  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), etat: loadEtat(), reglagesJ: rj, ages: loadAges(), megas: loadMegas(), pertes: loadPertes(), attaques: loadAttaques() };
 }
 const getCI = (obj, name) => { const k = Object.keys(obj || {}).find(x => x.toLowerCase() === name.toLowerCase()); return k ? obj[k] : {}; };
 function mergeSnap(a, b) {
@@ -1236,7 +1523,7 @@ function mergeSnap(a, b) {
     collections[n] = m;
   });
   const scores = {};
-  ["calc", "num", "sous", "mult", "plus"].forEach(mode => {
+  ["calc", "num", "sous", "mult", "plus", "dictee"].forEach(mode => {
     const seen = new Set(), all = [];
     [...((a.scores || {})[mode] || []), ...((b.scores || {})[mode] || [])].forEach(e => {
       const t = etat[String(e.who || "").toLowerCase()];
@@ -1254,7 +1541,32 @@ function mergeSnap(a, b) {
     // anciennes sauvegardes en ligne : réglages communs à tous, repris par chaque joueur qui n'a pas les siens
     if (!b.reglagesJ && b.reglages && !reglagesJ[n].v && !reglagesJ[n].maj) reglagesJ[n] = { v: b.reglages, maj: b.reglagesMaj || 0 };
   });
-  return { v: 1, joueurs: list, collections, scores, etat, reglagesJ };
+  // Âges : pour chaque joueur, la modification la plus récente gagne
+  const ages = {};
+  list.forEach(n => {
+    const x = getCI(a.ages, n), y = getCI(b.ages, n);
+    const best = (x.at || 0) >= (y.at || 0) ? x : y;
+    if (best.at || best.age != null) ages[n] = best;
+  });
+  // Méga créatures : union par identifiant ; une méga utilisée sur un appareil est utilisée partout
+  const megas = {}, pertes = {};
+  list.forEach(n => {
+    const byUid = {};
+    [...(getCI(a.megas, n).length ? getCI(a.megas, n) : []), ...(getCI(b.megas, n).length ? getCI(b.megas, n) : [])].forEach(m => {
+      const x = byUid[m.uid];
+      if (!x || (!x.usedAt && m.usedAt)) byUid[m.uid] = m;
+    });
+    const ms = Object.values(byUid);
+    if (ms.length) megas[n] = ms;
+    // Créatures détruites : on garde le plus grand nombre de captures détruites (comme pour les collections)
+    const x = getCI(a.pertes, n), y = getCI(b.pertes, n), pm = { ...x };
+    Object.keys(y).forEach(id => { pm[id] = Math.max(pm[id] || 0, y[id] || 0); });
+    if (Object.keys(pm).length) pertes[n] = pm;
+  });
+  const seenA = new Set(), attaques = [];
+  [...(a.attaques || []), ...(b.attaques || [])].forEach(x => { if (!seenA.has(x.uid)) { seenA.add(x.uid); attaques.push(x); } });
+  attaques.sort((x, y) => x.at - y.at);
+  return { v: 1, joueurs: list, collections, scores, etat, reglagesJ, ages, megas, pertes, attaques: attaques.slice(-100) };
 }
 function applySnap(s) {
   const p = loadPlayers();
@@ -1264,6 +1576,10 @@ function applySnap(s) {
   if (player && !s.joueurs.includes(player)) player = null;
   s.joueurs.forEach(n => rawSet(dexKey(n), JSON.stringify(s.collections[n] || {})));
   rawSet(KEY, JSON.stringify(s.scores));
+  rawSet(AGES_KEY, JSON.stringify(s.ages || {}));
+  rawSet(MEGAS_KEY, JSON.stringify(s.megas || {}));
+  rawSet(PERTES_KEY, JSON.stringify(s.pertes || {}));
+  rawSet(ATTAQUES_KEY, JSON.stringify(s.attaques || []));
   s.joueurs.forEach(n => {
     const r = (s.reglagesJ || {})[n] || {};
     if (r.maj) rawSet(majKey(n), String(r.maj));
