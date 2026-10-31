@@ -654,7 +654,7 @@ function unlockAudio() {
   try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === "suspended") audio.resume(); } catch (e) { audio = null; }
 }
 function gong() {
-  if (!audio) return;
+  if (!audio || document.hidden) return;
   const now = audio.currentTime + 0.02, out = audio.createGain();
   out.gain.value = 0.55; out.connect(audio.destination);
   // Partiels inharmoniques d'un gong : fréquence, volume, durée
@@ -676,7 +676,12 @@ const bgmMenu = document.getElementById("bgm"), bgmJeu = document.getElementById
 let musicOn = true, bgm = bgmMenu, musicTimer = null, gongAt = 0;
 try { musicOn = localStorage.getItem("defi2min-musique") !== "non"; } catch (e) {}
 bgmMenu.volume = 0.3; bgmJeu.volume = 0.3;
-function playMusic() { if (musicOn && bgm && bgm.paused) bgm.play().catch(() => {}); }
+function playMusic() { if (musicOn && bgm && bgm.paused && !document.hidden) bgm.play().catch(() => {}); }
+// Appli en arrière-plan (autre appli, écran verrouillé) : musique coupée ; elle reprend au retour sur l'appli
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { bgmMenu.pause(); bgmJeu.pause(); try { speechSynthesis.cancel(); } catch (e) {} }
+  else playMusic();
+});
 // "menu" : musique des menus ; "jeu" : musique du chrono, depuis le début ; "silence" : rien (bips et gong)
 function musicMode(mode) {
   clearTimeout(musicTimer);
@@ -737,7 +742,7 @@ loadAudio().then(() => { clearTimeout(skipTimer); hideLoader(); playMusic(); });
 
 // Petit bip léger pour le compte à rebours
 function bip() {
-  if (!audio) return;
+  if (!audio || document.hidden) return;
   const now = audio.currentTime + 0.01, osc = audio.createOscillator(), g = audio.createGain();
   osc.type = "sine"; osc.frequency.value = 880;
   g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.12, now + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
@@ -745,7 +750,7 @@ function bip() {
 }
 // Bonne réponse : petit arpège de harpe (do – mi – sol – do)
 function harpe() {
-  if (!audio) return;
+  if (!audio || document.hidden) return;
   const t0 = audio.currentTime + 0.01;
   [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
     const t = t0 + i * 0.07;
@@ -759,7 +764,7 @@ function harpe() {
 }
 // Mauvaise réponse : buzz grave et court
 function buzz() {
-  if (!audio) return;
+  if (!audio || document.hidden) return;
   const t = audio.currentTime + 0.01, lp = audio.createBiquadFilter(), g = audio.createGain();
   lp.type = "lowpass"; lp.frequency.value = 900;
   g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
@@ -1323,7 +1328,7 @@ function chercherVoix() {
 }
 if (voixOk()) { chercherVoix(); try { speechSynthesis.addEventListener("voiceschanged", chercherVoix); } catch (e) {} }
 function dire(texte, lent) {
-  if (!voixOk()) return;
+  if (!voixOk() || document.hidden) return;
   try {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(texte);
