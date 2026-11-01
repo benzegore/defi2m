@@ -272,6 +272,10 @@ tbody tr:first-child td { background: var(--pen-soft); }
 .dictee-in { text-transform: lowercase; font-size: clamp(1.5rem, 7vw, 2.2rem); line-height: 1.9; text-align: center; width: 100%; max-width: 460px; padding: 6px 14px; border-radius: 14px; border: 3px solid var(--pen); background: var(--paper); color: var(--ink); }
 .dictee-in:focus { outline: 3px solid var(--pen); outline-offset: 2px; }
 .dictee-fix { min-height: 2.4em; line-height: 1.9; font-size: 1.4rem; color: var(--red); text-align: center; }
+.tranche { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid #d6e4fb; }
+.tr-label, .tr-pct { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 700; }
+.tranche input[type=number], .tranche select { font: inherit; padding: 6px 8px; border: 2px solid var(--pen); border-radius: 10px; background: var(--paper); color: var(--ink); width: 5.5em; text-align: center; }
+.tranche select { width: auto; }
 </style>
 
 <!-- Écran de chargement : affiché tout de suite, avant que le reste (musiques) n'arrive -->
@@ -301,10 +305,24 @@ const BELTS = [
   { min: 30, name: "Rouge",   color: "#d23b34" },
   { min: 35, name: "Noire",   color: "#111111" },
 ];
-// Seuils adaptés à l'âge du joueur : − de 10 ans −10 %, 10 à 15 ans 0 %, + de 15 ans +60 %
-const coefForAge = a => a == null ? 1 : a < 10 ? 0.9 : a <= 15 ? 1 : 1.6;
-const coefText = a => a == null ? "âge non renseigné : 0 %" : a < 10 ? "−10 %" : a <= 15 ? "0 %" : "+60 %";
-const seuil = (min, who) => Math.round(min * coefForAge(ageOf(who)));
+// Seuils adaptés à l'âge du joueur : trois tranches d'âge réglables (page « Difficulté selon l'âge »), chacune avec un pourcentage en + ou en −
+const TRANCHES_KEY = "defi2min-tranches", TRANCHES_MAJ = "defi2min-tranches-maj";
+const TRANCHES_DEFAUT = { t1: 9, t2: 15, p1: -10, p2: 0, p3: 60 };   // jusqu'à t1 ans : p1 % · de t1+1 à t2 ans : p2 % · au-delà de t2 ans : p3 %
+function cleanTranches(t) {
+  const n = (v, lo, hi, d) => { if (v == null || v === "") return d; v = Number(v); return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
+  const r = { t1: n(t && t.t1, 1, 118, TRANCHES_DEFAUT.t1), t2: n(t && t.t2, 2, 119, TRANCHES_DEFAUT.t2),
+    p1: n(t && t.p1, -80, 300, TRANCHES_DEFAUT.p1), p2: n(t && t.p2, -80, 300, TRANCHES_DEFAUT.p2), p3: n(t && t.p3, -80, 300, TRANCHES_DEFAUT.p3) };
+  if (r.t2 <= r.t1) { r.t1 = TRANCHES_DEFAUT.t1; r.t2 = TRANCHES_DEFAUT.t2; }
+  return r;
+}
+function loadTranches() { try { return cleanTranches(JSON.parse(localStorage.getItem(TRANCHES_KEY))); } catch (e) { return { ...TRANCHES_DEFAUT }; } }
+let tranches = loadTranches();
+const pctOfAge = a => a <= tranches.t1 ? tranches.p1 : a <= tranches.t2 ? tranches.p2 : tranches.p3;
+const fmtPct = p => p < 0 ? "−" + (-p) + " %" : p > 0 ? "+" + p + " %" : "0 %";
+const coefForAge = a => a == null ? 1 : 1 + pctOfAge(a) / 100;
+const coefText = a => a == null ? "âge non renseigné : 0 %" : fmtPct(pctOfAge(a));
+const tranchesText = () => `jusqu'à ${tranches.t1} ans : ${fmtPct(tranches.p1)} · de ${tranches.t1 + 1} à ${tranches.t2} ans : ${fmtPct(tranches.p2)} · plus de ${tranches.t2} ans : ${fmtPct(tranches.p3)}`;
+const seuil = (min, who) => min === 0 ? 0 : Math.max(1, Math.round(min * coefForAge(ageOf(who))));
 const belt = (n, who = player) => BELTS.filter(b => n >= seuil(b.min, who)).pop();
 // Texte des tranches (« 5 à 9 », « 35 et + ») recalculé avec les seuils du joueur ; liste triée du plus petit seuil au plus grand
 function rangesFor(list, who) {
@@ -897,6 +915,10 @@ function adminPage() {
       <p class="saved" id="a-ok" hidden>Réglages enregistrés.</p>
       <div class="actions"><button class="big-btn" type="submit">Enregistrer</button><button class="big-btn alt" type="button" id="a-reset">Remettre les valeurs de départ</button></div>
     </form>
+    <section class="review"><h3>Difficulté selon l'âge</h3>
+      <p>${esc(tranchesText())}.</p>
+      <div class="actions"><button type="button" class="big-btn alt" id="go-ages">Modifier les tranches d'âge</button></div>
+    </section>
     <section class="review"><h3>Joueurs <small>${pl.length ? "supprime un joueur et tous ses résultats" : ""}</small></h3>
       ${pl.length ? pl.map((n, i) => { const d = dexOf(n), c = Object.keys(d).filter(k => d[k] > 0).length; return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #d6e4fb"><span><strong>${esc(n)}</strong> <small>${c} / ${NB_ESPECES * 3} créatures</small></span><span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end"><label for="a-age${i}" class="coef">Âge</label><input class="age-in small" type="number" id="a-age${i}" data-age="${i}" min="3" max="120" inputmode="numeric" value="${ageOf(n) ?? ""}" placeholder="?"><span class="coef" id="a-coef${i}">${coefText(ageOf(n))}</span><button type="button" class="ghost mini" data-del="${i}">Supprimer</button></span></div>`; }).join("") + `<p class="hint-left">L'âge adapte le nombre de réponses demandé pour les ceintures et les médailles : moins de 10 ans −10 %, 10 à 15 ans 0 %, plus de 15 ans +70 %. Il est enregistré dès que tu le modifies.</p>` : "<p>Aucun joueur pour l'instant.</p>"}
       <p class="saved" id="p-ok" hidden></p>
@@ -944,6 +966,7 @@ function adminPage() {
       ok.textContent = a == null ? `Âge de ${name} effacé.` : `Âge de ${name} enregistré : ${a} ans (${coefText(a)}).`; ok.hidden = false;
     };
   });
+  document.getElementById("go-ages").onclick = agesPage;
   document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
     const name = pl[b.dataset.del];
     if (!confirm("Supprimer le joueur « " + name + " » ?\n\nSes créatures et ses scores seront effacés" + (account ? " sur tous les appareils connectés au compte." : " de cet appareil.") + "\nCette action est définitive.")) return;
@@ -981,7 +1004,7 @@ function playersPage() {
       <div class="row"><input id="pseudo" maxlength="16" placeholder="Écris ton pseudo" autocomplete="off"><input id="age" class="age-in" type="number" min="3" max="120" inputmode="numeric" placeholder="Âge" aria-label="Âge"><button class="big-btn" type="submit">C'est moi !</button></div>
       <p class="err" id="err" hidden></p>
     </form>
-    <p style="margin:0"><button class="ghost mini" id="go-account">${account ? "Compte : " + esc(account.email) : "Se connecter / créer un compte"}</button></p>
+    <p style="margin:0"><button class="ghost mini" id="go-account">${account ? "Compte : " + esc(account.email) : "Se connecter / créer un compte"}</button> <button class="ghost mini" id="go-ages">Difficulté selon l'âge</button></p>
     ${p.list.length ? `<section class="review"><h3>Joueurs déjà inscrits <small>touche ton pseudo pour jouer</small></h3><div class="players">${p.list.map(card).join("")}</div></section>` : ""}`;
   document.getElementById("pf").onsubmit = e => {
     e.preventDefault();
@@ -995,6 +1018,7 @@ function playersPage() {
   document.querySelectorAll(".player").forEach(b => b.onclick = () => { choosePlayer(p.list[b.dataset.i]); menu(); });
   const back = document.getElementById("back"); if (back) back.onclick = menu;
   document.getElementById("go-account").onclick = accountPage;
+  document.getElementById("go-ages").onclick = agesPage;
 }
 
 /* ---------- Meilleurs scores ---------- */
@@ -1432,6 +1456,59 @@ function finDictee(hist, li, fini) {
   document.getElementById("back").onclick = menu;
 }
 
+/* ---------- Difficulté selon l'âge : tranches d'âge et pourcentages ---------- */
+function agesPage() {
+  clearInterval(timer); document.onkeydown = null;
+  const t = tranches;
+  const row = (i, label, pct) => `<div class="tranche">
+      <div class="tr-label">${label}</div>
+      <div class="tr-pct"><select id="sg${i}" aria-label="Plus difficile ou plus facile"><option value="1"${pct >= 0 ? " selected" : ""}>+ plus difficile</option><option value="-1"${pct < 0 ? " selected" : ""}>− plus facile</option></select><input type="number" id="pv${i}" value="${Math.abs(pct)}" min="0" max="300" inputmode="numeric" aria-label="Pourcentage"><span>%</span></div>
+      <small id="ex${i}"></small></div>`;
+  app.innerHTML = `
+    <header class="top"><div><h1>Difficulté <span>selon l'âge</span></h1><p class="lead">Les scores à atteindre pour les ceintures et les médailles sont augmentés ou diminués du pourcentage de la tranche d'âge du joueur. Ce réglage est commun à tous les joueurs (l'âge de chaque joueur se règle dans Réglages).</p></div><button class="big-btn alt" id="back">Retour</button></header>
+    <form id="ageform" class="admin" novalidate>
+      <section class="review">
+        ${row(1, `Jusqu'à <input type="number" id="t1" value="${t.t1}" min="1" max="118" inputmode="numeric" aria-label="Âge maximum de la tranche 1"> ans`, t.p1)}
+        ${row(2, `De <b id="t1b">${t.t1 + 1}</b> à <input type="number" id="t2" value="${t.t2}" min="2" max="119" inputmode="numeric" aria-label="Âge maximum de la tranche 2"> ans`, t.p2)}
+        ${row(3, `Plus de <b id="t2b">${t.t2}</b> ans`, t.p3)}
+        <p class="lead">Un joueur dont l'âge n'est pas renseigné reste à 0 %.</p>
+      </section>
+      <div class="actions"><button class="big-btn" type="submit">Enregistrer</button><button class="big-btn alt" type="button" id="reset">Valeurs d'origine</button></div>
+      <p class="err" id="g-err" hidden></p>
+      <p class="saved" id="g-ok" hidden></p>
+    </form>`;
+  const $ = id => document.getElementById(id);
+  const lire = () => ({ t1: Number($("t1").value), t2: Number($("t2").value),
+    p1: Number($("sg1").value) * Number($("pv1").value), p2: Number($("sg2").value) * Number($("pv2").value), p3: Number($("sg3").value) * Number($("pv3").value) });
+  const exemple = () => {
+    const r = lire();
+    $("t1b").textContent = (r.t1 + 1) || ""; $("t2b").textContent = r.t2 || "";
+    [r.p1, r.p2, r.p3].forEach((p, k) => {
+      const f = m => Math.max(1, Math.round(m * (1 + p / 100)));
+      $("ex" + (k + 1)).textContent = Number.isFinite(p) ? `Exemple : 6 devient ${f(6)} · 13 devient ${f(13)} · 35 devient ${f(35)}` : "";
+    });
+  };
+  document.querySelectorAll("#ageform input, #ageform select").forEach(el => { el.oninput = exemple; el.onchange = exemple; });
+  exemple();
+  $("ageform").onsubmit = e => {
+    e.preventDefault();
+    const r = lire(), err = $("g-err"), ok = $("g-ok"); err.hidden = true; ok.hidden = true;
+    const bad = t => { err.textContent = t; err.hidden = false; };
+    if (![r.t1, r.t2, r.p1, r.p2, r.p3].every(Number.isInteger)) return bad("Écris des nombres entiers dans toutes les cases.");
+    if (r.t1 < 1 || r.t2 > 119 || r.t2 <= r.t1) return bad("Les âges doivent aller dans l'ordre : la 2e tranche se termine après la 1re (entre 1 et 119 ans).");
+    if ([r.p1, r.p2, r.p3].some(p => p < -80 || p > 300)) return bad("Le pourcentage doit être entre −80 % et +300 %.");
+    try { localStorage.setItem(TRANCHES_KEY, JSON.stringify(r)); } catch (x) {}
+    tranches = loadTranches();
+    ok.textContent = "Enregistré : " + tranchesText() + "."; ok.hidden = false;
+  };
+  $("reset").onclick = () => {
+    try { localStorage.setItem(TRANCHES_KEY, JSON.stringify(TRANCHES_DEFAUT)); } catch (x) {}
+    tranches = loadTranches(); agesPage();
+    const ok = document.getElementById("g-ok"); ok.textContent = "Valeurs d'origine remises : " + tranchesText() + "."; ok.hidden = false;
+  };
+  $("back").onclick = () => (player ? adminPage() : playersPage());
+}
+
 // Au lancement, on arrive toujours sur le choix du joueur.
 if (!(player && loadPlayers().list.includes(player))) player = null;
 settings = loadSettings();
@@ -1509,7 +1586,7 @@ function snapshot() {
   p.list.forEach(n => { coll[n] = rawDexOf(n); });
   const rj = {};
   p.list.forEach(n => { rj[n] = { v: rawJSON(settingsKey(n)), maj: Number(localStorage.getItem(majKey(n))) || 0 }; });
-  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), etat: loadEtat(), reglagesJ: rj, ages: loadAges(), megas: loadMegas(), pertes: loadPertes(), attaques: loadAttaques() };
+  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), etat: loadEtat(), reglagesJ: rj, tranches: { v: rawJSON(TRANCHES_KEY), maj: Number(localStorage.getItem(TRANCHES_MAJ)) || 0 }, ages: loadAges(), megas: loadMegas(), pertes: loadPertes(), attaques: loadAttaques() };
 }
 const getCI = (obj, name) => { const k = Object.keys(obj || {}).find(x => x.toLowerCase() === name.toLowerCase()); return k ? obj[k] : {}; };
 function mergeSnap(a, b) {
@@ -1571,7 +1648,9 @@ function mergeSnap(a, b) {
   const seenA = new Set(), attaques = [];
   [...(a.attaques || []), ...(b.attaques || [])].forEach(x => { if (!seenA.has(x.uid)) { seenA.add(x.uid); attaques.push(x); } });
   attaques.sort((x, y) => x.at - y.at);
-  return { v: 1, joueurs: list, collections, scores, etat, reglagesJ, ages, megas, pertes, attaques: attaques.slice(-100) };
+  const ta = a.tranches || {}, tb = b.tranches || {}, tam = ta.maj || 0, tbm = tb.maj || 0;
+  const tranchesM = tam === tbm ? { v: ta.v || tb.v || null, maj: tam } : (tam > tbm ? { v: ta.v || null, maj: tam } : { v: tb.v || null, maj: tbm });
+  return { v: 1, joueurs: list, collections, scores, etat, reglagesJ, tranches: tranchesM, ages, megas, pertes, attaques: attaques.slice(-100) };
 }
 function applySnap(s) {
   const p = loadPlayers();
@@ -1590,6 +1669,10 @@ function applySnap(s) {
     if (r.maj) rawSet(majKey(n), String(r.maj));
     if (r.v) rawSet(settingsKey(n), JSON.stringify(r.v)); else { try { _removeItem.call(localStorage, settingsKey(n)); } catch (e) {} }
   });
+  const tr = s.tranches || {};
+  if (tr.maj) rawSet(TRANCHES_MAJ, String(tr.maj));
+  if (tr.v) rawSet(TRANCHES_KEY, JSON.stringify(tr.v));
+  tranches = loadTranches();
   settings = loadSettings();
 }
 
@@ -1617,6 +1700,7 @@ function scheduleSync() { if (!account) return; clearTimeout(syncTimer); syncTim
 Storage.prototype.setItem = function (k, v) {
   _setItem.call(this, k, v);
   if (this === localStorage && typeof k === "string" && k.startsWith(SETTINGS_KEY + ":")) rawSet(majKey(k.slice(SETTINGS_KEY.length + 1)), String(Date.now()));
+  if (this === localStorage && k === TRANCHES_KEY) rawSet(TRANCHES_MAJ, String(Date.now()));
   if (this === localStorage && typeof k === "string" && k.startsWith("defi2min-") && k !== ACC_KEY && k !== "defi2min-musique") scheduleSync();
 };
 Storage.prototype.removeItem = function (k) {
