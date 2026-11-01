@@ -637,13 +637,24 @@ function bindDex(d) {
 }
 
 const KEY = "defi2min-scores";
-function loadScores() { try { const s = JSON.parse(localStorage.getItem(KEY)) || {}; return { calc: s.calc || [], num: s.num || [], sous: s.sous || [], mult: s.mult || [], plus: s.plus || [], dictee: s.dictee || [] }; } catch (e) { return { calc: [], num: [], sous: [], mult: [], plus: [], dictee: [] }; } }
+// Les scores « nombres jusqu'à 99 » d'avant le passage à 10 exercices sans chrono sont ignorés (aussi à la synchro en ligne)
+const NUM_RESET = 1793561548419;
+function loadScores() { try { const s = JSON.parse(localStorage.getItem(KEY)) || {}; return { calc: s.calc || [], num: (s.num || []).filter(e => e.date >= NUM_RESET), sous: s.sous || [], mult: s.mult || [], plus: s.plus || [], dictee: s.dictee || [] }; } catch (e) { return { calc: [], num: [], sous: [], mult: [], plus: [], dictee: [] }; } }
+// On garde les 10 meilleures parties de chaque joueur (liste triée du meilleur au moins bon, tous joueurs confondus)
+function gardeScores(list) {
+  const n = {};
+  return [...list].sort((a, b) => b.score - a.score || a.date - b.date).filter(e => {
+    const k = String(e.who || "").toLowerCase();
+    n[k] = (n[k] || 0) + 1;
+    return n[k] <= 10;
+  });
+}
 function addScore(mode, score, total) {
   const all = loadScores(), entry = { score, total, date: Date.now(), who: player };
-  all[mode] = [...all[mode], entry].sort((a, b) => b.score - a.score || a.date - b.date).slice(0, 10);
+  all[mode] = gardeScores([...all[mode], entry]);
   try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) {}
-  const rank = all[mode].indexOf(entry);
-  return rank >= 0 ? rank + 1 : null;
+  const rank = all[mode].indexOf(entry);   // place parmi les 10 meilleures parties de tous les joueurs
+  return rank >= 0 && rank < 10 ? rank + 1 : null;
 }
 const fmtDate = t => new Date(t).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" }) + " à " + new Date(t).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 const rankMsg = r => r ? `<p class="rank">${r === 1 ? "Nouveau record !" : `Tu entres dans les meilleurs scores : ${r}e place.`}</p>` : "";
@@ -839,8 +850,8 @@ function menu() {
       <button class="mode" id="go-num">
         <h2>Les nombres jusqu'à 99</h2>
         <div class="ex">5d 4u · 50 + 4 · cinquante-quatre</div>
-        <p>Compte les paquets de 10 et les unités, puis barre les étiquettes fausses.</p>
-        <div class="best">Meilleur score : ${best.num != null ? best.num + " exercices réussis" + (medal(best.num, sc.num[0]?.who) ? " · " + medal(best.num, sc.num[0]?.who).name.toLowerCase() : "") : "pas encore joué"}</div>
+        <p>10 exercices, sans chrono : compte les paquets de 10 et les unités, puis barre les étiquettes fausses.</p>
+        <div class="best">Meilleur score : ${best.num != null ? best.num + " exercices réussis" + (medalDictee(best.num, sc.num[0]?.total) ? " · " + medalDictee(best.num, sc.num[0]?.total).name.toLowerCase() : "") : "pas encore joué"}</div>
         <span class="go">Commencer</span>
       </button>
       <button class="mode" id="go-sous">
@@ -869,8 +880,11 @@ function menu() {
     <section class="belts"><h3>Couleur de ceinture (calcul mental, soustractions et calcul mental +)</h3><div class="belt-row">
       ${BELTS.map((b, i) => `<div class="belt-chip"><span class="sw" style="background:${b.color}"></span><span>${b.name}<br><small>${rangesFor(BELTS, player)[i]}</small></span></div>`).join("")}
     </div></section>
-    <section class="belts"><h3>Médailles (nombres jusqu'à 99, multiplications et dictée)</h3><div class="belt-row">
+    <section class="belts"><h3>Médailles des multiplications</h3><div class="belt-row">
       ${MEDALS.map((m, i) => `<div class="belt-chip">${medalSVG(m, 22)}<span>${m.name}<br><small>${rangesFor([...MEDALS].reverse(), player).reverse()[i]} réponses justes</small></span></div>`).join("")}
+    </div></section>
+    <section class="belts"><h3>Médailles des nombres jusqu'à 99 et de la dictée (selon les fautes)</h3><div class="belt-row">
+      ${MEDALS.map((m, i) => `<div class="belt-chip">${medalSVG(m, 22)}<span>${m.name}<br><small>${i} faute${i > 1 ? "s" : ""}${i === 0 ? "" : " au plus"}</small></span></div>`).join("")}
     </div></section>`;
   document.getElementById("go-calc").onclick = () => calcGame("calc");
   document.getElementById("go-sous").onclick = () => calcGame("sous");
@@ -1027,25 +1041,29 @@ function playersPage() {
 }
 
 /* ---------- Meilleurs scores ---------- */
-function scoresPage() {
+function scoresPage(tous = true) {
   clearInterval(timer); document.onkeydown = null;
-  const sc = loadScores();
+  if (typeof tous !== "boolean") tous = true;   // appelée comme gestionnaire de clic : on repart de « tous les scores »
+  const all = loadScores(), sc = {};
+  Object.keys(all).forEach(m => { sc[m] = tous ? all[m].slice(0, 10) : all[m].filter(s => s.who === player); });
   const table =(list, mode) => list.length ? `<div class="tbl"><table>
       <thead><tr><th>Place</th><th>Joueur</th><th>Score</th><th>${mode === "num" || mode === "mult" || mode === "dictee" ? "Médaille" : "Ceinture"}</th><th>Date et heure</th></tr></thead>
       <tbody>${list.map((s, i) => {
         const usesMedal = mode === "num" || mode === "mult" || mode === "dictee";
-        const r = mode === "dictee" ? medalDictee(s.score, s.total) : usesMedal ? medal(s.score, s.who) : belt(s.score, s.who);
+        const r = mode === "dictee" || mode === "num" ? medalDictee(s.score, s.total) : usesMedal ? medal(s.score, s.who) : belt(s.score, s.who);
         const award = !usesMedal ? `<span class="sw" style="background:${r.color}"></span>${r.name}` : (r ? `${medalSVG(r, 18)}${r.short}` : `<span class="none">—</span>`);
         return `<tr><td class="pl">${i + 1}</td><td class="who-cell">${s.who ? esc(s.who) : "—"}</td><td><strong>${s.score}</strong> <small>/ ${s.total}</small></td><td><span class="aw">${award}</span></td><td>${fmtDate(s.date)}</td></tr>`;
       }).join("")}</tbody></table></div>` : `<p class="empty">Aucune partie terminée pour l'instant. Joue une partie pour voir ton score ici.</p>`;
   app.innerHTML = `
-    <header class="top"><div><h1>Meilleurs <span>scores</span></h1><p class="lead">Les 10 meilleures parties de chaque exercice, tous joueurs confondus, enregistrées sur cet appareil.</p></div><button class="big-btn alt" id="back">Menu</button></header>
+    <header class="top"><div><h1>Meilleurs <span>scores</span></h1><p class="lead">Les 10 meilleures parties de chaque exercice, ${tous ? "tous joueurs confondus" : "de " + esc(player)}, enregistrées sur cet appareil.</p></div><button class="big-btn alt" id="back">Menu</button></header>
+    <label class="check" for="all-scores"><input type="checkbox" id="all-scores"${tous ? " checked" : ""}> Voir les scores de tous les joueurs</label>
     <section class="review"><h3>Calcul mental</h3>${table(sc.calc, "calc")}</section>
     <section class="review"><h3>Les nombres jusqu'à 99</h3>${table(sc.num, "num")}</section>
     <section class="review"><h3>Soustractions</h3>${table(sc.sous, "sous")}</section>
     <section class="review"><h3>Multiplications</h3>${table(sc.mult, "mult")}</section>
     <section class="review"><h3>Calcul mental +</h3>${table(sc.plus, "plus")}</section>
     <section class="review"><h3>Dictée</h3>${table(sc.dictee, "dictee")}</section>`;
+  document.getElementById("all-scores").onchange = e => scoresPage(e.target.checked);
   document.getElementById("back").onclick = menu;
 }
 
@@ -1279,12 +1297,14 @@ function makeNum() {
   const labels = shuffle([...v.map(x => ({ txt: x, ok: true })), ...f.map(x => ({ txt: x, ok: false }))]);
   return { n, gT, gU, theme: THEMES[rnd(0, THEMES.length - 1)], labels, cr: pickCreature(-1) };
 }
+// Sans chrono : 10 exercices. 0 faute : or · 1 faute : argent · 2 fautes : bronze
+const NB_NUM = 10;
 function numGame() {
   const hist = []; let cur, locked = false;
   app.innerHTML = `
-    <div class="bar">${timerHTML()}<div class="info"><h2>Les nombres jusqu'à 99</h2><div id="count">0 exercice réussi</div></div><button class="ghost" id="stop">Arrêter</button></div>
+    <div class="bar"><div class="info"><h2>Les nombres jusqu'à 99</h2><div id="count"></div></div><button class="ghost" id="stop">Arrêter</button></div>
     <div class="card" id="card"></div>`;
-  const count = () => { const n = hist.filter(h => h.ok).length; document.getElementById("count").textContent = `${n} exercice${n > 1 ? "s" : ""} réussi${n > 1 ? "s" : ""} · ${hist.length} fait${hist.length > 1 ? "s" : ""}`; };
+  const count = () => { const f = hist.filter(h => !h.ok).length; document.getElementById("count").textContent = `Exercice ${Math.min(hist.length + 1, NB_NUM)} sur ${NB_NUM} · ${f} faute${f > 1 ? "s" : ""}`; };
   const render = () => {
     cur = makeNum(); locked = false;
     const k = cur.theme.draw;
@@ -1312,25 +1332,32 @@ function numGame() {
     hist.push({ n: cur.n, ok, cr: cur.cr, isNew: ok && addCatch(cur.cr), faux: cur.labels.filter(l => !l.ok).map(l => l.txt) }); count();
     wildEnd(ok, cur.cr); (ok ? harpe : buzz)();
     document.getElementById("card").classList.add(ok ? "ok" : "ko");
-    const v = document.getElementById("valid"); v.textContent = "Suivant"; v.onclick = next;
+    const last = hist.length >= NB_NUM;
+    const v = document.getElementById("valid"); v.textContent = last ? "Terminer" : "Suivant"; v.onclick = next;
     locked = true;
     if (ok) setTimeout(next, 900);
   };
-  const next = () => { const c = document.getElementById("card"); if (!c) return; c.classList.remove("ok", "ko"); render(); };
-  document.getElementById("stop").onclick = () => endNum(hist);
-  render(); startTimer(() => endNum(hist));
+  const next = () => {
+    const c = document.getElementById("card"); if (!c || locked === "done") return;
+    if (hist.length >= NB_NUM) { locked = "done"; return endNum(hist, true); }
+    c.classList.remove("ok", "ko"); render();
+  };
+  document.getElementById("stop").onclick = () => { locked = "done"; endNum(hist, false); };
+  clearInterval(timer); document.onkeydown = null;
+  musicMode("silence");
+  render();
 }
-function endNum(hist) {
+function endNum(hist, fini) {
   clearInterval(timer); musicMode("menu");
-  const good = hist.filter(h => h.ok).length;
-  const rank = hist.length ? addScore("num", good, hist.length) : null, m = medal(good);
-  const mega = m && m.short === "Or" ? grantMega("Médaille d'or · Les nombres jusqu'à 99") : null;
-  app.innerHTML = `
+  const good = hist.filter(h => h.ok).length, fautes = hist.length - good;
+  const rank = fini ? addScore("num", good, hist.length) : null, m = fini ? medalDictee(good, hist.length) : null;
+  const mega = m && m.short === "Or" ? grantMega("Médaille d'or · Les nombres jusqu'à 99") : null;  app.innerHTML = `
     <div class="result">
-      <h2>Score</h2>
+      <h2>${fini ? "Score" : "Exercices arrêtés"}</h2>
       <div class="score-ring"><div>${good}<small>/ ${hist.length}</small></div></div>
-      <strong>${good} exercice${good > 1 ? "s" : ""} réussi${good > 1 ? "s" : ""} sans erreur</strong>
-      ${m ? `<div class="belt-big">${medalSVG(m)}<strong>${m.name} !</strong></div>` : `<p class="rank-none">Pas encore de médaille : il faut ${seuil(6, player)} exercices justes pour le bronze.</p>`}
+      <strong>${good} exercice${good > 1 ? "s" : ""} réussi${good > 1 ? "s" : ""} · ${fautes} faute${fautes > 1 ? "s" : ""}</strong>
+      ${m ? `<div class="belt-big">${medalSVG(m)}<strong>${m.name} !</strong></div>`
+        : `<p class="rank-none">${fini ? "Pas de médaille cette fois : il faut au plus 2 fautes (0 faute : or, 1 : argent, 2 : bronze)." : "Il faut faire les " + NB_NUM + " exercices pour gagner une médaille."}</p>`}
       ${megaWonHTML(mega)}
       ${rankMsg(rank)}
       <div class="actions"><button class="big-btn" id="again">Rejouer</button><button class="big-btn alt" id="scores">Meilleurs scores</button><button class="big-btn alt" id="back">Menu</button></div>
@@ -1695,10 +1722,11 @@ function mergeSnap(a, b) {
     [...((a.scores || {})[mode] || []), ...((b.scores || {})[mode] || [])].forEach(e => {
       const t = etat[String(e.who || "").toLowerCase()];
       if (t && (t.del || e.date < t.at)) return;   // score d'un joueur supprimé
+      if (mode === "num" && e.date < NUM_RESET) return;   // anciens scores avec chrono
       const k = e.who + "|" + e.date + "|" + e.score;
       if (!seen.has(k)) { seen.add(k); all.push(e); }
     });
-    scores[mode] = all.sort((x, y) => y.score - x.score || x.date - y.date).slice(0, 10);
+    scores[mode] = gardeScores(all);
   });
   // Réglages de chaque joueur : la version la plus récente gagne (sans date connue, on garde ceux qui existent)
   const reglagesJ = {};
