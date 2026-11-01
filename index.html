@@ -865,7 +865,7 @@ function menu() {
         <h2>Multiplications</h2>
         <div class="ex">4 × 2 = ? · 3 × 7 = ? · 9 × 3 = ?</div>
         <p>${tablesText(settings.mult.tables)}.</p>
-        <div class="best">Meilleur score : ${best.mult != null ? best.mult + " bonnes réponses" + (medal(best.mult, sc.mult[0]?.who) ? " · " + medal(best.mult, sc.mult[0]?.who).name.toLowerCase() : "") : "pas encore joué"}</div>
+        <div class="best">Meilleur score : ${best.mult != null ? best.mult + " bonnes réponses · ceinture " + belt(best.mult, sc.mult[0]?.who).name : "pas encore joué"}</div>
         <span class="go">Commencer</span>
       </button>
       <button class="mode" id="go-dictee">
@@ -877,11 +877,8 @@ function menu() {
       </button>
     </div>
     <p class="age-note">Récompenses adaptées à l'âge de <strong>${esc(player)}</strong>${ageOf(player) != null ? ` (${ageOf(player)} ans)` : ""} : ${coefText(ageOf(player))}.</p>
-    <section class="belts"><h3>Couleur de ceinture (calcul mental, soustractions et calcul mental +)</h3><div class="belt-row">
+    <section class="belts"><h3>Couleur de ceinture (calcul mental, soustractions, multiplications et calcul mental +)</h3><div class="belt-row">
       ${BELTS.map((b, i) => `<div class="belt-chip"><span class="sw" style="background:${b.color}"></span><span>${b.name}<br><small>${rangesFor(BELTS, player)[i]}</small></span></div>`).join("")}
-    </div></section>
-    <section class="belts"><h3>Médailles des multiplications</h3><div class="belt-row">
-      ${MEDALS.map((m, i) => `<div class="belt-chip">${medalSVG(m, 22)}<span>${m.name}<br><small>${rangesFor([...MEDALS].reverse(), player).reverse()[i]} réponses justes</small></span></div>`).join("")}
     </div></section>
     <section class="belts"><h3>Médailles des nombres jusqu'à 99 et de la dictée (selon les fautes)</h3><div class="belt-row">
       ${MEDALS.map((m, i) => `<div class="belt-chip">${medalSVG(m, 22)}<span>${m.name}<br><small>${i} faute${i > 1 ? "s" : ""}${i === 0 ? "" : " au plus"}</small></span></div>`).join("")}
@@ -1047,9 +1044,9 @@ function scoresPage(tous = true) {
   const all = loadScores(), sc = {};
   Object.keys(all).forEach(m => { sc[m] = tous ? all[m].slice(0, 10) : all[m].filter(s => s.who === player); });
   const table =(list, mode) => list.length ? `<div class="tbl"><table>
-      <thead><tr><th>Place</th><th>Joueur</th><th>Score</th><th>${mode === "num" || mode === "mult" || mode === "dictee" ? "Médaille" : "Ceinture"}</th><th>Date et heure</th></tr></thead>
+      <thead><tr><th>Place</th><th>Joueur</th><th>Score</th><th>${mode === "num" || mode === "dictee" ? "Médaille" : "Ceinture"}</th><th>Date et heure</th></tr></thead>
       <tbody>${list.map((s, i) => {
-        const usesMedal = mode === "num" || mode === "mult" || mode === "dictee";
+        const usesMedal = mode === "num" || mode === "dictee";
         const r = mode === "dictee" || mode === "num" ? medalDictee(s.score, s.total) : usesMedal ? medal(s.score, s.who) : belt(s.score, s.who);
         const award = !usesMedal ? `<span class="sw" style="background:${r.color}"></span>${r.name}` : (r ? `${medalSVG(r, 18)}${r.short}` : `<span class="none">—</span>`);
         return `<tr><td class="pl">${i + 1}</td><td class="who-cell">${s.who ? esc(s.who) : "—"}</td><td><strong>${s.score}</strong> <small>/ ${s.total}</small></td><td><span class="aw">${award}</span></td><td>${fmtDate(s.date)}</td></tr>`;
@@ -1185,7 +1182,7 @@ function makeMult(prev) {
 const GAMES = {
   calc: { title: "Calcul mental", gen: makeCalc },
   sous: { title: "Soustractions", gen: makeSous },
-  mult: { title: "Multiplications", gen: makeMult, medals: true },
+  mult: { title: "Multiplications", gen: makeMult },
   // Calcul mental + : mélange des calculs de « Calcul mental » et de « Multiplications »
   plus: { title: "Calcul mental +", gen: prev => (Math.random() < 0.5 ? makeCalc : makeMult)(prev) },
 };
