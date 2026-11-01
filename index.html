@@ -301,9 +301,9 @@ const BELTS = [
   { min: 30, name: "Rouge",   color: "#d23b34" },
   { min: 35, name: "Noire",   color: "#111111" },
 ];
-// Seuils adaptés à l'âge du joueur : − de 10 ans −10 %, 10 à 15 ans 0 %, + de 15 ans +70 %
-const coefForAge = a => a == null ? 1 : a < 10 ? 0.9 : a <= 15 ? 1 : 1.7;
-const coefText = a => a == null ? "âge non renseigné : 0 %" : a < 10 ? "−10 %" : a <= 15 ? "0 %" : "+70 %";
+// Seuils adaptés à l'âge du joueur : − de 10 ans −10 %, 10 à 15 ans 0 %, + de 15 ans +60 %
+const coefForAge = a => a == null ? 1 : a < 10 ? 0.9 : a <= 15 ? 1 : 1.6;
+const coefText = a => a == null ? "âge non renseigné : 0 %" : a < 10 ? "−10 %" : a <= 15 ? "0 %" : "+60 %";
 const seuil = (min, who) => Math.round(min * coefForAge(ageOf(who)));
 const belt = (n, who = player) => BELTS.filter(b => n >= seuil(b.min, who)).pop();
 // Texte des tranches (« 5 à 9 », « 35 et + ») recalculé avec les seuils du joueur ; liste triée du plus petit seuil au plus grand
