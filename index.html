@@ -276,6 +276,7 @@ tbody tr:first-child td { background: var(--pen-soft); }
 .tr-label, .tr-pct { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 700; }
 .tranche input[type=number], .tranche select { font: inherit; padding: 6px 8px; border: 2px solid var(--pen); border-radius: 10px; background: var(--paper); color: var(--ink); width: 5.5em; text-align: center; }
 .tranche select { width: auto; }
+.dictee-area { width: 100%; min-height: 220px; font: inherit; padding: 10px; border: 2px solid var(--pen); border-radius: 12px; background: var(--paper); color: var(--ink); resize: vertical; box-sizing: border-box; }
 </style>
 
 <!-- Écran de chargement : affiché tout de suite, avant que le reste (musiques) n'arrive -->
@@ -915,6 +916,10 @@ function adminPage() {
       <p class="saved" id="a-ok" hidden>Réglages enregistrés.</p>
       <div class="actions"><button class="big-btn" type="submit">Enregistrer</button><button class="big-btn alt" type="button" id="a-reset">Remettre les valeurs de départ</button></div>
     </form>
+    <section class="review"><h3>Dictée</h3>
+      <p>${dictees.length} liste${dictees.length > 1 ? "s" : ""} : ${esc(dictees.map(l => l.titre).join(" · ") || "aucune")}.</p>
+      <div class="actions"><button type="button" class="big-btn alt" id="go-dictee-admin">Administration de la dictée</button></div>
+    </section>
     <section class="review"><h3>Difficulté selon l'âge</h3>
       <p>${esc(tranchesText())}.</p>
       <div class="actions"><button type="button" class="big-btn alt" id="go-ages">Modifier les tranches d'âge</button></div>
@@ -967,6 +972,7 @@ function adminPage() {
     };
   });
   document.getElementById("go-ages").onclick = agesPage;
+  document.getElementById("go-dictee-admin").onclick = dicteeAdminPage;
   document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
     const name = pl[b.dataset.del];
     if (!confirm("Supprimer le joueur « " + name + " » ?\n\nSes créatures et ses scores seront effacés" + (account ? " sur tous les appareils connectés au compte." : " de cet appareil.") + "\nCette action est définitive.")) return;
@@ -1004,7 +1010,7 @@ function playersPage() {
       <div class="row"><input id="pseudo" maxlength="16" placeholder="Écris ton pseudo" autocomplete="off"><input id="age" class="age-in" type="number" min="3" max="120" inputmode="numeric" placeholder="Âge" aria-label="Âge"><button class="big-btn" type="submit">C'est moi !</button></div>
       <p class="err" id="err" hidden></p>
     </form>
-    <p style="margin:0"><button class="ghost mini" id="go-account">${account ? "Compte : " + esc(account.email) : "Se connecter / créer un compte"}</button> <button class="ghost mini" id="go-ages">Difficulté selon l'âge</button></p>
+    <p style="margin:0"><button class="ghost mini" id="go-account">${account ? "Compte : " + esc(account.email) : "Se connecter / créer un compte"}</button></p>
     ${p.list.length ? `<section class="review"><h3>Joueurs déjà inscrits <small>touche ton pseudo pour jouer</small></h3><div class="players">${p.list.map(card).join("")}</div></section>` : ""}`;
   document.getElementById("pf").onsubmit = e => {
     e.preventDefault();
@@ -1018,7 +1024,6 @@ function playersPage() {
   document.querySelectorAll(".player").forEach(b => b.onclick = () => { choosePlayer(p.list[b.dataset.i]); menu(); });
   const back = document.getElementById("back"); if (back) back.onclick = menu;
   document.getElementById("go-account").onclick = accountPage;
-  document.getElementById("go-ages").onclick = agesPage;
 }
 
 /* ---------- Meilleurs scores ---------- */
@@ -1338,10 +1343,26 @@ function endNum(hist) {
 }
 
 /* ---------- Dictée : le joueur écoute un mot (voix du téléphone) et doit l'écrire ---------- */
-const DICTEES = [
-  { id: "a",  titre: "Liste 1 · le son « a »",  son: "a",  mots: ["un ami", "maman", "un lapin", "mardi", "samedi", "un pirate", "il va", "la salade", "avec"] },
-  { id: "ou", titre: "Liste 2 · le son « ou »", son: "ou", mots: ["un jour", "il se couche", "il roule", "une boule", "il trouve", "pourquoi", "un loup", "un mouton", "la bouche"] },
+const DICTEES_DEFAUT = [
+  { id: "a",  titre: "Liste 1 · le son « a »",  mots: ["un ami", "maman", "un lapin", "mardi", "samedi", "un pirate", "il va", "la salade", "avec"] },
+  { id: "ou", titre: "Liste 2 · le son « ou »",mots: ["un jour", "il se couche", "il roule", "une boule", "il trouve", "pourquoi", "un loup", "un mouton", "la bouche"] },
 ];
+const DICTEES_KEY = "defi2min-dictees", DICTEES_MAJ = "defi2min-dictees-maj";
+function cleanDictees(v) {
+  if (!Array.isArray(v)) return null;
+  const out = v.filter(l => l && typeof l.titre === "string" && l.titre.trim() && Array.isArray(l.mots) && l.mots.some(m => typeof m === "string" && m.trim()))
+    .map((l, i) => ({ id: typeof l.id === "string" && l.id ? l.id : "l" + i, titre: l.titre.trim(), mots: l.mots.filter(m => typeof m === "string" && m.trim()).map(m => m.trim()) }));
+  return out;
+}
+function loadDictees() {
+  try { const v = cleanDictees(JSON.parse(localStorage.getItem(DICTEES_KEY))); if (v) return v; } catch (e) {}
+  return DICTEES_DEFAUT.map(l => ({ ...l, mots: [...l.mots] }));
+}
+let dictees = loadDictees();
+function saveDictees(list) {
+  try { localStorage.setItem(DICTEES_KEY, JSON.stringify(list)); } catch (e) {}
+  dictees = loadDictees();
+}
 let voixFr = null;
 const voixOk = () => "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
 function chercherVoix() {
@@ -1367,23 +1388,87 @@ function dicteeMenu() {
   clearInterval(timer); document.onkeydown = null;
   if (voixOk()) chercherVoix();
   const best = loadScores().dictee[0];
-  const total = DICTEES.reduce((n, l) => n + l.mots.length, 0);
+  const total = dictees.reduce((n, l) => n + l.mots.length, 0);
   app.innerHTML = `
     <header class="top"><div><h1>Dic<span>tée</span></h1><p class="lead">Écoute bien chaque mot, puis écris-le. Chaque mot bien écrit attrape une créature ! Pas de chrono : 0 faute = médaille d'or, 1 faute = argent, 2 fautes = bronze.</p></div><button class="big-btn alt" id="back">Menu</button></header>
     ${!voixOk() ? `<p class="rank-none">Ce navigateur ne sait pas lire à voix haute : la dictée ne peut pas fonctionner ici.</p>`
       : voixFr ? "" : `<p class="rank-none">Aucune voix française n'a été trouvée sur cet appareil. Dans les réglages d'Android (Synthèse vocale), installe la voix française.</p>`}
     <div class="modes">
-      ${DICTEES.map((l, i) => `<button class="mode" data-l="${i}"><h2>${esc(l.titre)}</h2><div class="ex">🔊 le son « ${esc(l.son)} »</div><p>${l.mots.length} mots à écrire.</p><span class="go">Commencer</span></button>`).join("")}
-      ${DICTEES.length > 1 ? `<button class="mode" data-l="all"><h2>Toutes les listes</h2><div class="ex">🔊 tous les sons</div><p>${total} mots mélangés.</p><span class="go">Commencer</span></button>` : ""}
+      ${dictees.length ? "" : `<p class="rank-none">Aucune liste de mots. Crée-en une dans Réglages, puis Administration de la dictée.</p>`}
+      ${dictees.map((l, i) => `<button class="mode" data-l="${i}"><h2>${esc(l.titre)}</h2><div class="ex">🔊 ${l.mots.length} mot${l.mots.length > 1 ? "s" : ""}</div><p>À écrire, sans chrono.</p><span class="go">Commencer</span></button>`).join("")}
+      ${dictees.length > 1 ? `<button class="mode" data-l="all"><h2>Toutes les listes</h2><div class="ex">🔊 tout mélangé</div><p>${total} mots mélangés.</p><span class="go">Commencer</span></button>` : ""}
     </div>
     <p class="hint-left">Meilleur score : ${best ? best.score + " mot" + (best.score > 1 ? "s" : "") + " bien écrit" + (best.score > 1 ? "s" : "") + (medalDictee(best.score, best.total) ? " · " + medalDictee(best.score, best.total).name.toLowerCase() : "") : "pas encore joué"}</p>`;
   document.getElementById("back").onclick = menu;
   app.querySelectorAll("[data-l]").forEach(b => b.onclick = () => dicteeGame(b.dataset.l === "all" ? null : Number(b.dataset.l)));
 }
+/* ---------- Administration de la dictée : créer, modifier, supprimer les listes ---------- */
+function dicteeAdminPage() {
+  clearInterval(timer); document.onkeydown = null;
+  app.innerHTML = `
+    <header class="top"><div><h1>Administration <span>dictée</span></h1><p class="lead">Crée, modifie ou supprime les listes de mots de la dictée. Les listes sont communes à tous les joueurs et synchronisées avec ton compte.</p></div><button class="big-btn alt" id="back">Retour</button></header>
+    <section class="review">
+      ${dictees.length ? dictees.map((l, i) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #d6e4fb"><span><strong>${esc(l.titre)}</strong> <small>${l.mots.length} mot${l.mots.length > 1 ? "s" : ""}</small><br><small>${esc(l.mots.join(" · "))}</small></span><span style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="ghost mini" data-edit="${i}">Modifier</button><button type="button" class="ghost mini" data-rm="${i}">Supprimer</button></span></div>`).join("") : "<p>Aucune liste pour l'instant : crée-en une.</p>"}
+      <p class="saved" id="d-ok" hidden></p>
+    </section>
+    <div class="actions"><button class="big-btn" id="d-new" type="button">Nouvelle liste</button><button class="big-btn alt" id="d-reset" type="button">Listes d'origine</button></div>`;
+  const ok = t => { const o = document.getElementById("d-ok"); o.textContent = t; o.hidden = false; };
+  document.getElementById("back").onclick = adminPage;
+  document.getElementById("d-new").onclick = () => dicteeEditPage(null);
+  app.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => dicteeEditPage(Number(b.dataset.edit)));
+  app.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => {
+    const l = dictees[Number(b.dataset.rm)];
+    if (!confirm("Supprimer la liste « " + l.titre + " » ?\n\nLes scores déjà obtenus sont conservés.")) return;
+    saveDictees(dictees.filter(x => x !== l)); dicteeAdminPage(); document.getElementById("d-ok").textContent = "Liste « " + l.titre + " » supprimée."; document.getElementById("d-ok").hidden = false;
+  });
+  document.getElementById("d-reset").onclick = () => {
+    if (!confirm("Remettre les listes d'origine ?\n\nTes listes créées ou modifiées seront remplacées.")) return;
+    saveDictees(DICTEES_DEFAUT.map(l => ({ ...l, mots: [...l.mots] }))); dicteeAdminPage();
+    document.getElementById("d-ok").textContent = "Listes d'origine remises."; document.getElementById("d-ok").hidden = false;
+  };
+}
+function dicteeEditPage(i) {
+  clearInterval(timer); document.onkeydown = null;
+  const l = i == null ? { titre: "", mots: [] } : dictees[i];
+  app.innerHTML = `
+    <header class="top"><div><h1>${i == null ? "Nouvelle" : "Modifier la"} <span>liste</span></h1><p class="lead">Donne un titre à la liste, puis écris les mots, un par ligne.</p></div><button class="big-btn alt" id="back" type="button">Annuler</button></header>
+    <form id="df" class="admin" novalidate>
+      <section class="review">
+        <label class="field" for="d-titre"><span>Titre de la liste</span><input type="text" id="d-titre" value="${esc(l.titre)}" maxlength="60" placeholder="Liste 3 · le son « on »" autocomplete="off"><small>Ce titre s'affiche dans le choix de la dictée.</small></label>
+        <label class="field" for="d-mots"><span>Mots de la liste (un par ligne)</span><textarea id="d-mots" class="dictee-area" rows="10" spellcheck="false" autocapitalize="none" autocomplete="off" placeholder="un ami&#10;maman&#10;il se couche">${esc(l.mots.join("\n"))}</textarea><small>Un mot ou un groupe de mots par ligne, écrit exactement comme l'élève doit l'écrire (accents compris). La voix lit le texte tel quel. Les doublons sont retirés.</small></label>
+      </section>
+      <div class="actions"><button class="big-btn" type="submit">Enregistrer</button><button class="big-btn alt" id="d-cancel" type="button">Annuler</button></div>
+      <p class="err" id="d-err" hidden></p>
+    </form>`;
+  document.getElementById("back").onclick = dicteeAdminPage;
+  document.getElementById("d-cancel").onclick = dicteeAdminPage;
+  document.getElementById("df").onsubmit = e => {
+    e.preventDefault();
+    const err = document.getElementById("d-err"); err.hidden = true;
+    const bad = t => { err.textContent = t; err.hidden = false; };
+    const titre = document.getElementById("d-titre").value.trim().replace(/\s+/g, " ");
+    const mots = [], vus = new Set();
+    document.getElementById("d-mots").value.split(/\r?\n/).forEach(x => {
+      x = x.trim().replace(/\s+/g, " ");
+      if (x && !vus.has(x.toLowerCase())) { vus.add(x.toLowerCase()); mots.push(x); }
+    });
+    if (!titre) return bad("Écris un titre pour la liste.");
+    if (!mots.length) return bad("Écris au moins un mot (un par ligne).");
+    if (mots.length > 100) return bad("Une liste peut contenir 100 mots au maximum.");
+    if (mots.some(m => m.length > 60)) return bad("Un mot ou groupe de mots ne peut pas dépasser 60 caractères.");
+    const liste = i == null ? { id: "l" + Date.now().toString(36), titre, mots } : { ...dictees[i], titre, mots };
+    saveDictees(i == null ? [...dictees, liste] : dictees.map((x, k) => (k === i ? liste : x)));
+    dicteeAdminPage();
+    const o = document.getElementById("d-ok"); o.textContent = "Liste « " + titre + " » enregistrée (" + mots.length + " mot" + (mots.length > 1 ? "s" : "") + ")."; o.hidden = false;
+  };
+}
+
 // Dictée sans chrono : on écrit tous les mots de la liste. 0 faute : or · 1 faute : argent · 2 fautes : bronze
 const medalDictee = (good, total) => { if (!total) return null; const f = total - good; return f === 0 ? MEDALS[0] : f === 1 ? MEDALS[1] : f === 2 ? MEDALS[2] : null; };
 function dicteeGame(li) {
-  const mots = shuffle([...(li == null ? DICTEES.flatMap(l => l.mots) : DICTEES[li].mots)]);
+  if (li != null && !dictees[li]) return dicteeMenu();
+  const mots = shuffle([...(li == null ? dictees.flatMap(l => l.mots) : dictees[li].mots)]);
+  if (!mots.length) return dicteeMenu();
   const hist = []; let cur = null, locked = false, i = 0;
   const nouveau = () => ({ mot: mots[i], cr: pickCreature(cur ? Math.floor(cur.cr / 3) : -1) });
   app.innerHTML = `
@@ -1506,7 +1591,7 @@ function agesPage() {
     tranches = loadTranches(); agesPage();
     const ok = document.getElementById("g-ok"); ok.textContent = "Valeurs d'origine remises : " + tranchesText() + "."; ok.hidden = false;
   };
-  $("back").onclick = () => (player ? adminPage() : playersPage());
+  $("back").onclick = adminPage;
 }
 
 // Au lancement, on arrive toujours sur le choix du joueur.
@@ -1586,7 +1671,7 @@ function snapshot() {
   p.list.forEach(n => { coll[n] = rawDexOf(n); });
   const rj = {};
   p.list.forEach(n => { rj[n] = { v: rawJSON(settingsKey(n)), maj: Number(localStorage.getItem(majKey(n))) || 0 }; });
-  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), etat: loadEtat(), reglagesJ: rj, tranches: { v: rawJSON(TRANCHES_KEY), maj: Number(localStorage.getItem(TRANCHES_MAJ)) || 0 }, ages: loadAges(), megas: loadMegas(), pertes: loadPertes(), attaques: loadAttaques() };
+  return { v: 1, joueurs: p.list, collections: coll, scores: loadScores(), etat: loadEtat(), reglagesJ: rj, tranches: { v: rawJSON(TRANCHES_KEY), maj: Number(localStorage.getItem(TRANCHES_MAJ)) || 0 }, dictees: { v: rawJSON(DICTEES_KEY), maj: Number(localStorage.getItem(DICTEES_MAJ)) || 0 }, ages: loadAges(), megas: loadMegas(), pertes: loadPertes(), attaques: loadAttaques() };
 }
 const getCI = (obj, name) => { const k = Object.keys(obj || {}).find(x => x.toLowerCase() === name.toLowerCase()); return k ? obj[k] : {}; };
 function mergeSnap(a, b) {
@@ -1650,7 +1735,9 @@ function mergeSnap(a, b) {
   attaques.sort((x, y) => x.at - y.at);
   const ta = a.tranches || {}, tb = b.tranches || {}, tam = ta.maj || 0, tbm = tb.maj || 0;
   const tranchesM = tam === tbm ? { v: ta.v || tb.v || null, maj: tam } : (tam > tbm ? { v: ta.v || null, maj: tam } : { v: tb.v || null, maj: tbm });
-  return { v: 1, joueurs: list, collections, scores, etat, reglagesJ, tranches: tranchesM, ages, megas, pertes, attaques: attaques.slice(-100) };
+  const da = a.dictees || {}, db = b.dictees || {}, dam = da.maj || 0, dbm = db.maj || 0;
+  const dicteesM = dam === dbm ? { v: da.v || db.v || null, maj: dam } : (dam > dbm ? { v: da.v || null, maj: dam } : { v: db.v || null, maj: dbm });
+  return { v: 1, joueurs: list, collections, scores, etat, reglagesJ, tranches: tranchesM, dictees: dicteesM, ages, megas, pertes, attaques: attaques.slice(-100) };
 }
 function applySnap(s) {
   const p = loadPlayers();
@@ -1673,6 +1760,10 @@ function applySnap(s) {
   if (tr.maj) rawSet(TRANCHES_MAJ, String(tr.maj));
   if (tr.v) rawSet(TRANCHES_KEY, JSON.stringify(tr.v));
   tranches = loadTranches();
+  const dc = s.dictees || {};
+  if (dc.maj) rawSet(DICTEES_MAJ, String(dc.maj));
+  if (dc.v) rawSet(DICTEES_KEY, JSON.stringify(dc.v));
+  dictees = loadDictees();
   settings = loadSettings();
 }
 
@@ -1701,6 +1792,7 @@ Storage.prototype.setItem = function (k, v) {
   _setItem.call(this, k, v);
   if (this === localStorage && typeof k === "string" && k.startsWith(SETTINGS_KEY + ":")) rawSet(majKey(k.slice(SETTINGS_KEY.length + 1)), String(Date.now()));
   if (this === localStorage && k === TRANCHES_KEY) rawSet(TRANCHES_MAJ, String(Date.now()));
+  if (this === localStorage && k === DICTEES_KEY) rawSet(DICTEES_MAJ, String(Date.now()));
   if (this === localStorage && typeof k === "string" && k.startsWith("defi2min-") && k !== ACC_KEY && k !== "defi2min-musique") scheduleSync();
 };
 Storage.prototype.removeItem = function (k) {
